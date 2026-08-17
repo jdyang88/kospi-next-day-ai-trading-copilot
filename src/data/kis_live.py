@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from datetime import date, timedelta
+import re
 from typing import Mapping, Protocol
 
 import pandas as pd
@@ -24,6 +25,39 @@ KIS_STARTER_UNIVERSE: dict[str, str] = {
 }
 
 OHLCV_COLUMNS = ["date", "ticker", "name", "open", "high", "low", "close", "volume"]
+MAX_UNIVERSE_SIZE = 30
+
+
+def parse_watchlist(raw: str) -> tuple[dict[str, str], list[str]]:
+    """Parse `종목코드:종목명` items separated by commas, semicolons or lines."""
+    watchlist: dict[str, str] = {}
+    errors: list[str] = []
+    for item in re.split(r"[,;\n]+", raw or ""):
+        item = item.strip()
+        if not item:
+            continue
+        if ":" not in item:
+            errors.append(f"'{item}' → 종목코드:종목명 형식이 아닙니다.")
+            continue
+        ticker, name = (part.strip() for part in item.split(":", 1))
+        if not re.fullmatch(r"\d{6}", ticker) or not name:
+            errors.append(f"'{item}' → 6자리 종목코드와 종목명이 필요합니다.")
+            continue
+        watchlist[ticker] = name
+    return watchlist, errors
+
+
+def build_analysis_universe(
+    *watchlists: Mapping[str, str],
+    include_starter: bool = True,
+    max_size: int = MAX_UNIVERSE_SIZE,
+) -> tuple[dict[str, str], int]:
+    """Merge watchlists by ticker and cap requests to a safe starter size."""
+    combined: dict[str, str] = dict(KIS_STARTER_UNIVERSE) if include_starter else {}
+    for watchlist in watchlists:
+        combined.update(watchlist)
+    truncated = max(0, len(combined) - max_size)
+    return dict(list(combined.items())[:max_size]), truncated
 
 
 class ReadOnlyMarketData(Protocol):
@@ -124,9 +158,11 @@ def apply_kis_quote_snapshot(
             time.sleep(request_pause)
 
     if not snapshots:
-        return history.copy(), errors
+        return history.iloc[0:0].copy(), errors
 
     snapshot_frame = pd.DataFrame(snapshots, columns=OHLCV_COLUMNS)
+    successful_tickers = set(snapshot_frame["ticker"])
+    history = history[history["ticker"].isin(successful_tickers)].copy()
     snapshot_keys = pd.MultiIndex.from_frame(snapshot_frame[["date", "ticker"]])
     history_keys = pd.MultiIndex.from_frame(history[["date", "ticker"]])
     merged = pd.concat([history.loc[~history_keys.isin(snapshot_keys)], snapshot_frame], ignore_index=True)

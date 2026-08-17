@@ -5,7 +5,12 @@ from src.backtest import walk_forward_backtest
 from src.api.kis_adapter import KoreaInvestmentAdapter
 from src.config import Settings
 from src.data.demo import make_demo_ohlcv
-from src.data.kis_live import apply_kis_quote_snapshot, fetch_kis_daily_history
+from src.data.kis_live import (
+    apply_kis_quote_snapshot,
+    build_analysis_universe,
+    fetch_kis_daily_history,
+    parse_watchlist,
+)
 from src.features import FEATURE_COLUMNS, add_technical_features, latest_feature_rows
 from src.model import train_direction_model
 from src.ranking import rank_stocks
@@ -87,3 +92,36 @@ def test_kis_history_and_live_snapshot_are_normalized():
     latest = live.sort_values("date").groupby("ticker").tail(1)
     assert (latest["close"] == 71_500).all()
     assert (latest["volume"] == 2_345_678).all()
+
+
+def test_watchlists_are_validated_deduplicated_and_capped():
+    parsed, errors = parse_watchlist(
+        "005930:삼성전자,086790:하나금융지주\n잘못된값;009150:삼성전기"
+    )
+    assert parsed["086790"] == "하나금융지주"
+    assert len(errors) == 1
+    universe, truncated = build_analysis_universe(
+        parsed, {"005930": "삼성전자(관심)"}, max_size=11
+    )
+    assert universe["005930"] == "삼성전자(관심)"
+    assert len(universe) == 11
+    assert truncated == 1
+
+
+class _PartiallyFailingMarketData(_FakeMarketData):
+    def current_price(self, ticker):
+        if ticker == "000660":
+            raise RuntimeError("일시 오류")
+        return super().current_price(ticker)
+
+
+def test_failed_live_quote_is_excluded_from_analysis():
+    universe = {"005930": "삼성전자", "000660": "SK하이닉스"}
+    history, _ = fetch_kis_daily_history(
+        _FakeMarketData(), universe, max_pages=1, request_pause=0
+    )
+    live, errors = apply_kis_quote_snapshot(
+        history, _PartiallyFailingMarketData(), universe, request_pause=0
+    )
+    assert set(live["ticker"]) == {"005930"}
+    assert "000660" in errors

@@ -93,6 +93,10 @@ class KoreaInvestmentAdapter:
                 message_code = str(payload.get("msg_cd", ""))
                 if response.status_code == 429 or message_code == "EGW00201":
                     raise requests.exceptions.RetryError("KIS 시세 호출 제한")
+                if response.status_code in {500, 502, 503, 504}:
+                    raise requests.exceptions.RetryError(
+                        f"KIS 시세 서버 일시 오류 ({response.status_code})"
+                    )
                 response.raise_for_status()
                 if str(payload.get("rt_cd", "0")) != "0":
                     raise RuntimeError(payload.get("msg1") or message_code or "KIS 시세 조회 실패")

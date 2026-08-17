@@ -18,6 +18,7 @@ class Settings:
     app_secret: str = ""
     account_no: str = ""
     account_product_code: str = "01"
+    watchlist: str = ""
     paper_trading: bool = True
     auto_trading_enabled: bool = False
 
@@ -46,6 +47,7 @@ def load_settings() -> Settings:
         app_secret=value("APP_SECRET"),
         account_no=value("ACCOUNT_NO"),
         account_product_code=value("ACCOUNT_PRODUCT_CODE", "01"),
+        watchlist=value("WATCHLIST"),
         paper_trading=value("KIS_MODE", "paper").lower() != "live",
         # Safety invariant: this MVP never enables order submission.
         auto_trading_enabled=False,

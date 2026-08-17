@@ -12,7 +12,13 @@ from src.api.kis_adapter import KoreaInvestmentAdapter
 from src.backtest import walk_forward_backtest
 from src.config import JOURNAL_PATH, load_settings
 from src.data.demo import DEMO_UNIVERSE, demo_universe_table, make_demo_ohlcv
-from src.data.kis_live import KIS_STARTER_UNIVERSE, apply_kis_quote_snapshot, fetch_kis_daily_history
+from src.data.kis_live import (
+    KIS_STARTER_UNIVERSE,
+    apply_kis_quote_snapshot,
+    build_analysis_universe,
+    fetch_kis_daily_history,
+    parse_watchlist,
+)
 from src.features import FEATURE_COLUMNS, add_technical_features, latest_feature_rows
 from src.journal import append_trade, load_journal
 from src.model import train_direction_model
@@ -43,13 +49,17 @@ def load_kis_adapter() -> KoreaInvestmentAdapter:
 
 
 @st.cache_data(ttl=21_600, show_spinner=False)
-def load_kis_history_data() -> tuple[pd.DataFrame, dict[str, str]]:
-    return fetch_kis_daily_history(load_kis_adapter())
+def load_kis_history_data(
+    universe_items: tuple[tuple[str, str], ...],
+) -> tuple[pd.DataFrame, dict[str, str]]:
+    return fetch_kis_daily_history(load_kis_adapter(), dict(universe_items))
 
 
 @st.cache_data(ttl=30, show_spinner=False)
-def load_kis_snapshot(history: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, str]]:
-    return apply_kis_quote_snapshot(history, load_kis_adapter())
+def load_kis_snapshot(
+    history: pd.DataFrame, universe_items: tuple[tuple[str, str], ...]
+) -> tuple[pd.DataFrame, dict[str, str]]:
+    return apply_kis_quote_snapshot(history, load_kis_adapter(), dict(universe_items))
 
 
 @st.cache_resource(show_spinner=False)
@@ -156,7 +166,12 @@ def recommendations_page(featured: pd.DataFrame, model_result, data_label: str) 
         st.plotly_chart(fig, use_container_width=True)
 
 
-def scanner_page(featured: pd.DataFrame, model_result, data_label: str) -> None:
+def scanner_page(
+    featured: pd.DataFrame,
+    model_result,
+    data_label: str,
+    analysis_universe: dict[str, str] | None = None,
+) -> None:
     st.header("종목 스캐너")
     st.caption(f"{data_label} 유니버스의 최신 기술지표와 예측 점수를 확인합니다.")
     rows = latest_feature_rows(featured)
@@ -181,7 +196,10 @@ def scanner_page(featured: pd.DataFrame, model_result, data_label: str) -> None:
     with st.expander("분석 유니버스 보기"):
         if data_label.startswith("KIS"):
             universe = pd.DataFrame(
-                [{"종목코드": ticker, "종목명": name} for ticker, name in KIS_STARTER_UNIVERSE.items()]
+                [
+                    {"종목코드": ticker, "종목명": name}
+                    for ticker, name in (analysis_universe or KIS_STARTER_UNIVERSE).items()
+                ]
             )
             st.dataframe(universe, use_container_width=True, hide_index=True)
         else:
@@ -214,13 +232,17 @@ def backtest_page(featured: pd.DataFrame) -> None:
         st.dataframe(result.trades.tail(100), use_container_width=True, hide_index=True)
 
 
-def journal_page() -> None:
+def journal_page(analysis_universe: dict[str, str] | None = None) -> None:
     st.header("매매일지")
     st.caption("추천을 실제로 검토하거나 매매한 기록을 로컬 CSV에 저장합니다.")
     with st.form("journal_form", clear_on_submit=True):
         cols = st.columns(4)
         trade_date = cols[0].date_input("일자", value=date.today())
-        journal_universe = {**DEMO_UNIVERSE, **KIS_STARTER_UNIVERSE}
+        journal_universe = {
+            **DEMO_UNIVERSE,
+            **KIS_STARTER_UNIVERSE,
+            **(analysis_universe or {}),
+        }
         name = cols[1].selectbox("종목", list(dict.fromkeys(journal_universe.values())))
         side = cols[2].selectbox("구분", ["관찰", "매수", "매도"])
         quantity = cols[3].number_input("수량", min_value=0, value=0)
@@ -247,7 +269,10 @@ def settings_page(settings, data_label: str) -> None:
     c2.metric("KIS 자격증명", "설정됨" if settings.credentials_ready else "미설정")
     c3.metric("주문 기능", "영구 비활성화")
     st.subheader("환경변수")
-    st.code("APP_KEY=\nAPP_SECRET=\nACCOUNT_NO=\nACCOUNT_PRODUCT_CODE=01\nKIS_MODE=paper", language="bash")
+    st.code(
+        "APP_KEY=\nAPP_SECRET=\nACCOUNT_NO=\nACCOUNT_PRODUCT_CODE=01\nKIS_MODE=paper\nWATCHLIST=086790:하나금융지주,009150:삼성전기",
+        language="bash",
+    )
     st.write(f"선택된 연결 모드: **{adapter.mode_label}**")
     st.warning("실전 모드를 선택해도 이 프로젝트는 주문 API를 호출하지 않습니다. 실제 주문은 한국투자증권 앱에서 직접 실행하세요.")
 
@@ -273,6 +298,7 @@ def settings_page(settings, data_label: str) -> None:
 
 def main() -> None:
     settings = load_settings()
+    secret_watchlist, secret_watchlist_errors = parse_watchlist(settings.watchlist)
     with st.sidebar:
         st.markdown("### 메뉴")
         page = st.radio("페이지", ["오늘의 추천", "종목 스캐너", "백테스트", "매매일지", "설정"], label_visibility="collapsed")
@@ -287,30 +313,71 @@ def main() -> None:
         )
         if not settings.credentials_ready:
             st.caption("KIS Secrets를 설정하면 실시간 모드를 사용할 수 있습니다.")
+
+        with st.expander("관심종목 설정"):
+            with st.form("watchlist_form"):
+                include_starter = st.checkbox("기본 10종목 포함", value=True)
+                watchlist_input = st.text_area(
+                    "추가 관심종목",
+                    placeholder="086790:하나금융지주\n009150:삼성전기",
+                    help="종목코드:종목명 형식으로 쉼표 또는 줄바꿈하여 입력하세요.",
+                )
+                apply_watchlist = st.form_submit_button("관심종목 적용", use_container_width=True)
+            if apply_watchlist:
+                session_watchlist, input_errors = parse_watchlist(watchlist_input)
+                st.session_state["session_watchlist"] = session_watchlist
+                st.session_state["watchlist_input_errors"] = input_errors
+                if input_errors:
+                    st.warning("일부 입력을 확인해 주세요.")
+                else:
+                    st.success(f"추가 관심종목 {len(session_watchlist)}개를 적용했습니다.")
+
+        session_watchlist = st.session_state.get("session_watchlist", {})
+        active_universe, truncated = build_analysis_universe(
+            secret_watchlist,
+            session_watchlist,
+            include_starter=include_starter,
+        )
+        universe_items = tuple(active_universe.items())
+        universe_key = universe_items
+        st.caption(f"현재 분석 대상: {len(active_universe)}종목")
+        input_errors = st.session_state.get("watchlist_input_errors", [])
+        if secret_watchlist_errors or input_errors:
+            st.warning("형식이 잘못된 관심종목은 제외했습니다.")
+        if truncated:
+            st.warning(f"호출 안정성을 위해 최대 30종목만 사용합니다. {truncated}종목은 제외됐습니다.")
+
         if source == "KIS 실시간":
             if st.button("실시간 추천 데이터 불러오기", type="primary", use_container_width=True):
                 try:
                     with st.spinner("KIS 일봉과 현재 시세를 읽고 있습니다..."):
-                        history, history_errors = load_kis_history_data()
-                        live_raw, quote_errors = load_kis_snapshot(history)
+                        history, history_errors = load_kis_history_data(universe_items)
+                        live_raw, quote_errors = load_kis_snapshot(history, universe_items)
                         if live_raw.empty or live_raw["ticker"].nunique() < 3:
                             raise RuntimeError("분석 가능한 종목이 3개 미만입니다.")
                         st.session_state["kis_live_raw"] = live_raw
                         st.session_state["kis_live_errors"] = {**history_errors, **quote_errors}
                         st.session_state["kis_live_updated_at"] = datetime.now(ZoneInfo("Asia/Seoul"))
+                        st.session_state["kis_live_universe_key"] = universe_key
                     st.success("실시간 추천 데이터를 불러왔습니다.")
                 except Exception as exc:
                     st.error(f"KIS 데이터 조회 실패: {exc}")
             updated_at = st.session_state.get("kis_live_updated_at")
             if updated_at:
                 st.caption(f"최근 조회: {updated_at:%Y-%m-%d %H:%M:%S} KST")
+                if st.session_state.get("kis_live_universe_key") != universe_key:
+                    st.info("관심종목이 변경되었습니다. 실시간 데이터를 다시 불러오세요.")
             else:
                 st.info("위 버튼을 눌러야 KIS 시세가 추천에 반영됩니다.")
         st.markdown("---")
-        st.caption("v1.1.0 · 읽기 전용")
+        st.caption("v1.2.0 · 읽기 전용")
         st.markdown('<div class="mode-note">일봉 모델 + 장중 스냅샷<br>자동주문 영구 비활성화</div>', unsafe_allow_html=True)
 
-    use_live = source == "KIS 실시간" and "kis_live_raw" in st.session_state
+    use_live = (
+        source == "KIS 실시간"
+        and "kis_live_raw" in st.session_state
+        and st.session_state.get("kis_live_universe_key") == universe_key
+    )
     if use_live:
         raw = st.session_state["kis_live_raw"]
         data_label = "KIS 실시간 시세"
@@ -324,13 +391,19 @@ def main() -> None:
     header(data_label)
     disclaimer(data_label)
     live_errors = st.session_state.get("kis_live_errors", {}) if use_live else {}
+    if use_live:
+        successful_count = int(raw["ticker"].nunique())
+        count_cols = st.columns(3)
+        count_cols[0].metric("분석 대상", f"{len(active_universe)}종목")
+        count_cols[1].metric("조회 성공", f"{successful_count}종목")
+        count_cols[2].metric("조회 제외", f"{len(active_universe) - successful_count}종목")
     if live_errors:
         st.warning(f"일부 종목 조회 실패: {len(live_errors)}개. 성공한 종목만 분석했습니다.")
         with st.expander("제외된 종목과 사유"):
             error_rows = [
                 {
                     "종목코드": ticker,
-                    "종목명": KIS_STARTER_UNIVERSE.get(ticker, "시장 데이터"),
+                    "종목명": active_universe.get(ticker, "시장 데이터"),
                     "사유": message,
                 }
                 for ticker, message in live_errors.items()
@@ -342,11 +415,11 @@ def main() -> None:
     if page == "오늘의 추천":
         recommendations_page(featured, model_result, data_label)
     elif page == "종목 스캐너":
-        scanner_page(featured, model_result, data_label)
+        scanner_page(featured, model_result, data_label, active_universe)
     elif page == "백테스트":
         backtest_page(featured)
     elif page == "매매일지":
-        journal_page()
+        journal_page(active_universe)
     else:
         settings_page(settings, data_label)
 
