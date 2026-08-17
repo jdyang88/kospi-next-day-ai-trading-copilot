@@ -1,0 +1,4 @@
+date,ticker,name,side,quantity,price,strategy,memo
+2026-08-12,005930,삼성전자,매수,10,81400,Next-Day Top 5,데모 기록
+2026-08-13,005930,삼성전자,매도,10,82700,Next-Day Top 5,목표 전 수동 청산
+
