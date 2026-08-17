@@ -1,9 +1,11 @@
 import numpy as np
+import pandas as pd
 
 from src.backtest import walk_forward_backtest
 from src.api.kis_adapter import KoreaInvestmentAdapter
 from src.config import Settings
 from src.data.demo import make_demo_ohlcv
+from src.data.kis_live import apply_kis_quote_snapshot, fetch_kis_daily_history
 from src.features import FEATURE_COLUMNS, add_technical_features, latest_feature_rows
 from src.model import train_direction_model
 from src.ranking import rank_stocks
@@ -43,3 +45,45 @@ def test_order_submission_is_always_disabled():
         raise AssertionError("주문 차단이 작동하지 않았습니다.")
     except PermissionError:
         pass
+
+
+class _FakeMarketData:
+    def daily_prices(self, ticker, start, end):
+        dates = pd.bdate_range(end=pd.Timestamp(end), periods=100)
+        base = 50_000 if ticker == "005930" else 100_000
+        return pd.DataFrame(
+            {
+                "date": dates,
+                "ticker": ticker,
+                "open": base,
+                "high": base + 2_000,
+                "low": base - 2_000,
+                "close": base + np.arange(100),
+                "volume": 1_000_000 + np.arange(100),
+            }
+        )
+
+    def current_price(self, ticker):
+        return {
+            "stck_oprc": "70000",
+            "stck_hgpr": "72000",
+            "stck_lwpr": "69000",
+            "stck_prpr": "71500",
+            "acml_vol": "2345678",
+        }
+
+
+def test_kis_history_and_live_snapshot_are_normalized():
+    universe = {"005930": "삼성전자", "000660": "SK하이닉스"}
+    history, history_errors = fetch_kis_daily_history(
+        _FakeMarketData(), universe, max_pages=2, request_pause=0
+    )
+    live, quote_errors = apply_kis_quote_snapshot(
+        history, _FakeMarketData(), universe, request_pause=0
+    )
+    assert not history_errors
+    assert not quote_errors
+    assert set(live.columns) == {"date", "ticker", "name", "open", "high", "low", "close", "volume"}
+    latest = live.sort_values("date").groupby("ticker").tail(1)
+    assert (latest["close"] == 71_500).all()
+    assert (latest["volume"] == 2_345_678).all()

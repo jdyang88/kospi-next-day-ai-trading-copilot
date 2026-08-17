@@ -118,6 +118,17 @@ class KoreaInvestmentAdapter:
         frame["ticker"] = ticker
         return frame[["date", "ticker", "open", "high", "low", "close", "volume"]].sort_values("date")
 
+    def realtime_snapshot(self, ticker: str) -> dict[str, Any]:
+        """Return the read-only fields used to build an intraday OHLCV row."""
+        quote = self.current_price(ticker)
+        return {
+            "ticker": ticker,
+            "open": quote.get("stck_oprc"),
+            "high": quote.get("stck_hgpr"),
+            "low": quote.get("stck_lwpr"),
+            "close": quote.get("stck_prpr"),
+            "volume": quote.get("acml_vol"),
+        }
+
     def submit_order(self, *_: Any, **__: Any) -> None:
         raise PermissionError("이 MVP는 자동매매를 지원하지 않습니다. 주문은 증권사 앱에서 직접 실행하세요.")
-

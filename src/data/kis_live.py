@@ -1,0 +1,133 @@
+from __future__ import annotations
+
+import time
+from datetime import date, timedelta
+from typing import Mapping, Protocol
+
+import pandas as pd
+
+
+# A deliberately small, liquid starter universe keeps the first live scan
+# responsive and comfortably below market-data request limits. It can be
+# expanded after the read-only workflow has been observed in production.
+KIS_STARTER_UNIVERSE: dict[str, str] = {
+    "005930": "삼성전자",
+    "000660": "SK하이닉스",
+    "373220": "LG에너지솔루션",
+    "207940": "삼성바이오로직스",
+    "005380": "현대차",
+    "000270": "기아",
+    "068270": "셀트리온",
+    "035420": "NAVER",
+    "105560": "KB금융",
+    "055550": "신한지주",
+}
+
+OHLCV_COLUMNS = ["date", "ticker", "name", "open", "high", "low", "close", "volume"]
+
+
+class ReadOnlyMarketData(Protocol):
+    def daily_prices(self, ticker: str, start: str, end: str) -> pd.DataFrame: ...
+
+    def current_price(self, ticker: str) -> dict: ...
+
+
+def fetch_kis_daily_history(
+    adapter: ReadOnlyMarketData,
+    universe: Mapping[str, str] = KIS_STARTER_UNIVERSE,
+    *,
+    lookback_days: int = 720,
+    max_pages: int = 5,
+    request_pause: float = 0.12,
+) -> tuple[pd.DataFrame, dict[str, str]]:
+    """Fetch paged KIS daily history without allowing one symbol to abort a scan."""
+    start_date = date.today() - timedelta(days=lookback_days)
+    all_frames: list[pd.DataFrame] = []
+    errors: dict[str, str] = {}
+
+    for ticker, name in universe.items():
+        ticker_frames: list[pd.DataFrame] = []
+        page_end = date.today()
+        try:
+            for _ in range(max_pages):
+                page = adapter.daily_prices(ticker, start_date.isoformat(), page_end.isoformat())
+                if page.empty:
+                    break
+                ticker_frames.append(page)
+                oldest = pd.Timestamp(page["date"].min()).date()
+                if oldest <= start_date or len(page) < 90:
+                    break
+                next_end = oldest - timedelta(days=1)
+                if next_end >= page_end:
+                    break
+                page_end = next_end
+                if request_pause:
+                    time.sleep(request_pause)
+
+            if not ticker_frames:
+                raise RuntimeError("일봉 데이터가 없습니다.")
+            ticker_history = pd.concat(ticker_frames, ignore_index=True)
+            ticker_history = ticker_history.drop_duplicates(["date", "ticker"], keep="last")
+            ticker_history["name"] = name
+            all_frames.append(ticker_history[OHLCV_COLUMNS])
+        except Exception as exc:  # isolate upstream/API failures by symbol
+            errors[ticker] = str(exc)
+        if request_pause:
+            time.sleep(request_pause)
+
+    if not all_frames:
+        return pd.DataFrame(columns=OHLCV_COLUMNS), errors
+    result = pd.concat(all_frames, ignore_index=True)
+    result = result.sort_values(["ticker", "date"]).reset_index(drop=True)
+    return result, errors
+
+
+def apply_kis_quote_snapshot(
+    history: pd.DataFrame,
+    adapter: ReadOnlyMarketData,
+    universe: Mapping[str, str] = KIS_STARTER_UNIVERSE,
+    *,
+    request_pause: float = 0.12,
+) -> tuple[pd.DataFrame, dict[str, str]]:
+    """Replace each symbol's latest daily row with the current KIS OHLCV snapshot."""
+    if history.empty:
+        return history.copy(), {"market": "먼저 KIS 일봉 데이터를 불러와야 합니다."}
+
+    snapshots: list[dict] = []
+    errors: dict[str, str] = {}
+    for ticker, name in universe.items():
+        ticker_history = history[history["ticker"] == ticker]
+        if ticker_history.empty:
+            continue
+        try:
+            quote = adapter.current_price(ticker)
+            values = {
+                "open": pd.to_numeric(quote.get("stck_oprc"), errors="coerce"),
+                "high": pd.to_numeric(quote.get("stck_hgpr"), errors="coerce"),
+                "low": pd.to_numeric(quote.get("stck_lwpr"), errors="coerce"),
+                "close": pd.to_numeric(quote.get("stck_prpr"), errors="coerce"),
+                "volume": pd.to_numeric(quote.get("acml_vol"), errors="coerce"),
+            }
+            if any(pd.isna(value) or value <= 0 for value in values.values()):
+                raise RuntimeError("현재가 응답의 OHLCV 값이 불완전합니다.")
+
+            # On weekends/holidays the quote represents the latest business day.
+            # Replacing that row avoids inventing a non-trading date.
+            snapshot_date = pd.Timestamp(ticker_history["date"].max()).normalize()
+            today = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
+            if today.weekday() < 5:
+                snapshot_date = max(snapshot_date, today)
+            snapshots.append({"date": snapshot_date, "ticker": ticker, "name": name, **values})
+        except Exception as exc:
+            errors[ticker] = str(exc)
+        if request_pause:
+            time.sleep(request_pause)
+
+    if not snapshots:
+        return history.copy(), errors
+
+    snapshot_frame = pd.DataFrame(snapshots, columns=OHLCV_COLUMNS)
+    snapshot_keys = pd.MultiIndex.from_frame(snapshot_frame[["date", "ticker"]])
+    history_keys = pd.MultiIndex.from_frame(history[["date", "ticker"]])
+    merged = pd.concat([history.loc[~history_keys.isin(snapshot_keys)], snapshot_frame], ignore_index=True)
+    return merged.sort_values(["ticker", "date"]).reset_index(drop=True), errors

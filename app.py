@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import plotly.express as px
@@ -11,6 +12,7 @@ from src.api.kis_adapter import KoreaInvestmentAdapter
 from src.backtest import walk_forward_backtest
 from src.config import JOURNAL_PATH, load_settings
 from src.data.demo import DEMO_UNIVERSE, demo_universe_table, make_demo_ohlcv
+from src.data.kis_live import KIS_STARTER_UNIVERSE, apply_kis_quote_snapshot, fetch_kis_daily_history
 from src.features import FEATURE_COLUMNS, add_technical_features, latest_feature_rows
 from src.journal import append_trade, load_journal
 from src.model import train_direction_model
@@ -34,6 +36,23 @@ def load_demo_data() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 @st.cache_resource(show_spinner=False)
+def load_kis_adapter() -> KoreaInvestmentAdapter:
+    # Reuse one read-only adapter so KIS token issuance is not repeated between
+    # historical and current-price requests.
+    return KoreaInvestmentAdapter(load_settings())
+
+
+@st.cache_data(ttl=21_600, show_spinner=False)
+def load_kis_history_data() -> tuple[pd.DataFrame, dict[str, str]]:
+    return fetch_kis_daily_history(load_kis_adapter())
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def load_kis_snapshot(history: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, str]]:
+    return apply_kis_quote_snapshot(history, load_kis_adapter())
+
+
+@st.cache_resource(show_spinner=False)
 def load_model(featured: pd.DataFrame):
     return train_direction_model(featured)
 
@@ -53,7 +72,7 @@ def pct(value: float, digits: int = 1) -> str:
     return f"{value * 100:.{digits}f}%"
 
 
-def header() -> None:
+def header(data_label: str) -> None:
     left, right = st.columns([4, 1.25], vertical_alignment="center")
     with left:
         st.title("KOSPI Next-Day AI Trading Copilot")
@@ -63,14 +82,15 @@ def header() -> None:
         )
     with right:
         st.markdown(
-            '<div class="status-line"><span class="status-dot"></span>데모 모드 · 자동매매 꺼짐</div>',
+            f'<div class="status-line"><span class="status-dot"></span>{data_label} · 자동매매 꺼짐</div>',
             unsafe_allow_html=True,
         )
 
 
-def disclaimer() -> None:
+def disclaimer(data_label: str) -> None:
+    source_note = "실시간·과거 KIS 시세" if data_label.startswith("KIS") else "합성 일봉 데이터"
     st.markdown(
-        '<div class="disclaimer"><strong>중요:</strong> 모든 결과는 합성 일봉 데이터에서 얻은 확률 기반 참고 정보이며, 투자 수익을 보장하지 않습니다. 실제 주문은 사용자가 별도로 판단하고 실행해야 합니다.</div>',
+        f'<div class="disclaimer"><strong>중요:</strong> 모든 결과는 {source_note}에서 얻은 확률 기반 참고 정보이며, 투자 수익을 보장하지 않습니다. 실제 주문은 사용자가 별도로 판단하고 실행해야 합니다.</div>',
         unsafe_allow_html=True,
     )
 
@@ -98,11 +118,11 @@ def recommendation_row(rank: int, row: pd.Series) -> None:
             st.markdown(f'<span class="label">선정 이유</span><span class="reason">{row["reason"]}</span>', unsafe_allow_html=True)
 
 
-def recommendations_page(featured: pd.DataFrame, model_result) -> None:
+def recommendations_page(featured: pd.DataFrame, model_result, data_label: str) -> None:
     title_col, action_col = st.columns([4.5, 1], vertical_alignment="center")
     with title_col:
         st.markdown(
-            '<div class="section-head"><strong>오늘의 Top 5</strong><span>최신 합성 일봉 종가 기준</span></div>',
+            f'<div class="section-head"><strong>오늘의 Top 5</strong><span>{data_label} 기준</span></div>',
             unsafe_allow_html=True,
         )
     with action_col:
@@ -136,9 +156,9 @@ def recommendations_page(featured: pd.DataFrame, model_result) -> None:
         st.plotly_chart(fig, use_container_width=True)
 
 
-def scanner_page(featured: pd.DataFrame, model_result) -> None:
+def scanner_page(featured: pd.DataFrame, model_result, data_label: str) -> None:
     st.header("종목 스캐너")
-    st.caption("MVP 데모 유니버스 전체의 최신 기술지표와 예측 점수를 확인합니다.")
+    st.caption(f"{data_label} 유니버스의 최신 기술지표와 예측 점수를 확인합니다.")
     rows = latest_feature_rows(featured)
     rows["상승확률"] = model_result.model.predict_proba(rows[FEATURE_COLUMNS])[:, 1]
     view = rows[["ticker", "name", "close", "상승확률", "ret_20d", "rsi_14", "volume_ratio_20", "relative_strength_20"]].copy()
@@ -158,8 +178,14 @@ def scanner_page(featured: pd.DataFrame, model_result) -> None:
             "상대강도": st.column_config.NumberColumn(format="%.2%%"),
         },
     )
-    with st.expander("데모 유니버스 보기"):
-        st.dataframe(demo_universe_table(), use_container_width=True, hide_index=True)
+    with st.expander("분석 유니버스 보기"):
+        if data_label.startswith("KIS"):
+            universe = pd.DataFrame(
+                [{"종목코드": ticker, "종목명": name} for ticker, name in KIS_STARTER_UNIVERSE.items()]
+            )
+            st.dataframe(universe, use_container_width=True, hide_index=True)
+        else:
+            st.dataframe(demo_universe_table(), use_container_width=True, hide_index=True)
 
 
 def backtest_page(featured: pd.DataFrame) -> None:
@@ -194,7 +220,8 @@ def journal_page() -> None:
     with st.form("journal_form", clear_on_submit=True):
         cols = st.columns(4)
         trade_date = cols[0].date_input("일자", value=date.today())
-        name = cols[1].selectbox("종목", list(DEMO_UNIVERSE.values()))
+        journal_universe = {**DEMO_UNIVERSE, **KIS_STARTER_UNIVERSE}
+        name = cols[1].selectbox("종목", list(dict.fromkeys(journal_universe.values())))
         side = cols[2].selectbox("구분", ["관찰", "매수", "매도"])
         quantity = cols[3].number_input("수량", min_value=0, value=0)
         cols2 = st.columns([1, 1, 2])
@@ -203,7 +230,7 @@ def journal_page() -> None:
         memo = cols2[2].text_input("메모")
         submitted = st.form_submit_button("기록 저장", type="primary")
         if submitted:
-            ticker = next(code for code, stock_name in DEMO_UNIVERSE.items() if stock_name == name)
+            ticker = next(code for code, stock_name in journal_universe.items() if stock_name == name)
             append_trade(JOURNAL_PATH, {"date": trade_date.isoformat(), "ticker": ticker, "name": name, "side": side, "quantity": quantity, "price": price, "strategy": strategy, "memo": memo})
             st.success("매매일지를 저장했습니다.")
     journal = load_journal(JOURNAL_PATH).sort_values("date", ascending=False)
@@ -212,11 +239,11 @@ def journal_page() -> None:
         st.download_button("CSV 내려받기", JOURNAL_PATH.read_bytes(), file_name="trade_journal.csv", mime="text/csv")
 
 
-def settings_page(settings) -> None:
+def settings_page(settings, data_label: str) -> None:
     st.header("데이터 및 API 설정")
-    adapter = KoreaInvestmentAdapter(settings)
+    adapter = load_kis_adapter()
     c1, c2, c3 = st.columns(3)
-    c1.metric("현재 데이터", "합성 데모 일봉")
+    c1.metric("현재 데이터", data_label)
     c2.metric("KIS 자격증명", "설정됨" if settings.credentials_ready else "미설정")
     c3.metric("주문 기능", "영구 비활성화")
     st.subheader("환경변수")
@@ -246,29 +273,72 @@ def settings_page(settings) -> None:
 
 def main() -> None:
     settings = load_settings()
-    header()
-    disclaimer()
     with st.sidebar:
         st.markdown("### 메뉴")
         page = st.radio("페이지", ["오늘의 추천", "종목 스캐너", "백테스트", "매매일지", "설정"], label_visibility="collapsed")
         st.markdown("---")
-        st.caption("v1.0.0 · 합성 데모")
-        st.markdown('<div class="mode-note">일봉 기반 MVP<br>15:10 장중 연동 준비됨</div>', unsafe_allow_html=True)
+        st.markdown("### 데이터 모드")
+        source = st.radio(
+            "데이터 모드",
+            ["데모", "KIS 실시간"],
+            horizontal=True,
+            label_visibility="collapsed",
+            disabled=not settings.credentials_ready,
+        )
+        if not settings.credentials_ready:
+            st.caption("KIS Secrets를 설정하면 실시간 모드를 사용할 수 있습니다.")
+        if source == "KIS 실시간":
+            if st.button("실시간 추천 데이터 불러오기", type="primary", use_container_width=True):
+                try:
+                    with st.spinner("KIS 일봉과 현재 시세를 읽고 있습니다..."):
+                        history, history_errors = load_kis_history_data()
+                        live_raw, quote_errors = load_kis_snapshot(history)
+                        if live_raw.empty or live_raw["ticker"].nunique() < 3:
+                            raise RuntimeError("분석 가능한 종목이 3개 미만입니다.")
+                        st.session_state["kis_live_raw"] = live_raw
+                        st.session_state["kis_live_errors"] = {**history_errors, **quote_errors}
+                        st.session_state["kis_live_updated_at"] = datetime.now(ZoneInfo("Asia/Seoul"))
+                    st.success("실시간 추천 데이터를 불러왔습니다.")
+                except Exception as exc:
+                    st.error(f"KIS 데이터 조회 실패: {exc}")
+            updated_at = st.session_state.get("kis_live_updated_at")
+            if updated_at:
+                st.caption(f"최근 조회: {updated_at:%Y-%m-%d %H:%M:%S} KST")
+            else:
+                st.info("위 버튼을 눌러야 KIS 시세가 추천에 반영됩니다.")
+        st.markdown("---")
+        st.caption("v1.1.0 · 읽기 전용")
+        st.markdown('<div class="mode-note">일봉 모델 + 장중 스냅샷<br>자동주문 영구 비활성화</div>', unsafe_allow_html=True)
 
-    with st.spinner("데모 시장을 분석하고 있습니다..."):
-        _, featured = load_demo_data()
-        model_result = load_model(featured)
+    use_live = source == "KIS 실시간" and "kis_live_raw" in st.session_state
+    if use_live:
+        raw = st.session_state["kis_live_raw"]
+        data_label = "KIS 실시간 시세"
+        with st.spinner("KIS 시장 데이터를 분석하고 있습니다..."):
+            featured = add_technical_features(raw)
+    else:
+        data_label = "합성 데모" if source == "데모" else "합성 데모 미리보기"
+        with st.spinner("데모 시장을 분석하고 있습니다..."):
+            _, featured = load_demo_data()
+
+    header(data_label)
+    disclaimer(data_label)
+    live_errors = st.session_state.get("kis_live_errors", {}) if use_live else {}
+    if live_errors:
+        st.warning(f"일부 종목 조회 실패: {len(live_errors)}개. 성공한 종목만 분석했습니다.")
+
+    model_result = load_model(featured)
 
     if page == "오늘의 추천":
-        recommendations_page(featured, model_result)
+        recommendations_page(featured, model_result, data_label)
     elif page == "종목 스캐너":
-        scanner_page(featured, model_result)
+        scanner_page(featured, model_result, data_label)
     elif page == "백테스트":
         backtest_page(featured)
     elif page == "매매일지":
         journal_page()
     else:
-        settings_page(settings)
+        settings_page(settings, data_label)
 
 
 if __name__ == "__main__":
