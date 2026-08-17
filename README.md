@@ -4,6 +4,10 @@
 
 > 이 프로젝트의 출력은 확률적 참고 정보이며 투자 수익을 보장하지 않습니다. 자동매매는 코드 수준에서 비활성화되어 있습니다.
 
+## 공개 데모
+
+[Streamlit Community Cloud에서 앱 실행하기](https://kospi-next-day-ai-trading-copilot-lfyci4mtch4f6djvy6mzyk.streamlit.app/)
+
 ## 주요 기능
 
 - KOSPI 데모 유니버스 스캔 및 Top 5 랭킹
@@ -95,4 +99,3 @@ pytest -q
 ```
 
 백테스트는 교육용 구현입니다. 생존편향, 상장폐지, 거래정지, 가격제한폭, 체결 가능 수량, 세금, 배당·분할 등 실제 시장의 모든 요소를 완전히 반영하지 않습니다.
-
