@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import time
 from typing import Any
 
 import pandas as pd
@@ -74,21 +75,48 @@ class KoreaInvestmentAdapter:
             "content-type": "application/json; charset=utf-8",
         }
 
+    def _market_get(self, path: str, tr_id: str, params: dict[str, str]) -> dict[str, Any]:
+        """GET market data with bounded retries for transient KIS throttling/network errors."""
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                response = requests.get(
+                    f"{self.base_url}{path}",
+                    headers=self._headers(tr_id),
+                    params=params,
+                    timeout=self.timeout,
+                )
+                try:
+                    payload = response.json()
+                except ValueError:
+                    payload = {}
+                message_code = str(payload.get("msg_cd", ""))
+                if response.status_code == 429 or message_code == "EGW00201":
+                    raise requests.exceptions.RetryError("KIS 시세 호출 제한")
+                response.raise_for_status()
+                if str(payload.get("rt_cd", "0")) != "0":
+                    raise RuntimeError(payload.get("msg1") or message_code or "KIS 시세 조회 실패")
+                return payload
+            except (requests.Timeout, requests.ConnectionError, requests.exceptions.RetryError) as exc:
+                last_error = exc
+                if attempt == 2:
+                    raise
+                time.sleep(0.6 * (2**attempt))
+        raise RuntimeError("KIS 시세 조회 실패") from last_error
+
     def current_price(self, ticker: str) -> dict[str, Any]:
-        response = requests.get(
-            f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-price",
-            headers=self._headers("FHKST01010100"),
-            params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": ticker},
-            timeout=self.timeout,
+        payload = self._market_get(
+            "/uapi/domestic-stock/v1/quotations/inquire-price",
+            "FHKST01010100",
+            {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": ticker},
         )
-        response.raise_for_status()
-        return response.json().get("output", {})
+        return payload.get("output", {})
 
     def daily_prices(self, ticker: str, start: str, end: str) -> pd.DataFrame:
-        response = requests.get(
-            f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
-            headers=self._headers("FHKST03010100"),
-            params={
+        payload = self._market_get(
+            "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
+            "FHKST03010100",
+            {
                 "FID_COND_MRKT_DIV_CODE": "J",
                 "FID_INPUT_ISCD": ticker,
                 "FID_INPUT_DATE_1": start.replace("-", ""),
@@ -96,10 +124,8 @@ class KoreaInvestmentAdapter:
                 "FID_PERIOD_DIV_CODE": "D",
                 "FID_ORG_ADJ_PRC": "0",
             },
-            timeout=self.timeout,
         )
-        response.raise_for_status()
-        items = response.json().get("output2", [])
+        items = payload.get("output2", [])
         if not items:
             return pd.DataFrame(columns=["date", "ticker", "open", "high", "low", "close", "volume"])
         frame = pd.DataFrame(items).rename(

@@ -326,6 +326,16 @@ def main() -> None:
     live_errors = st.session_state.get("kis_live_errors", {}) if use_live else {}
     if live_errors:
         st.warning(f"일부 종목 조회 실패: {len(live_errors)}개. 성공한 종목만 분석했습니다.")
+        with st.expander("제외된 종목과 사유"):
+            error_rows = [
+                {
+                    "종목코드": ticker,
+                    "종목명": KIS_STARTER_UNIVERSE.get(ticker, "시장 데이터"),
+                    "사유": message,
+                }
+                for ticker, message in live_errors.items()
+            ]
+            st.dataframe(pd.DataFrame(error_rows), width="stretch", hide_index=True)
 
     model_result = load_model(featured)
 
