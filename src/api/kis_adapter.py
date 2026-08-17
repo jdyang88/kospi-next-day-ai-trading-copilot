@@ -78,7 +78,7 @@ class KoreaInvestmentAdapter:
     def _market_get(self, path: str, tr_id: str, params: dict[str, str]) -> dict[str, Any]:
         """GET market data with bounded retries for transient KIS throttling/network errors."""
         last_error: Exception | None = None
-        for attempt in range(3):
+        for attempt in range(4):
             try:
                 response = requests.get(
                     f"{self.base_url}{path}",
@@ -103,9 +103,9 @@ class KoreaInvestmentAdapter:
                 return payload
             except (requests.Timeout, requests.ConnectionError, requests.exceptions.RetryError) as exc:
                 last_error = exc
-                if attempt == 2:
+                if attempt == 3:
                     raise
-                time.sleep(0.6 * (2**attempt))
+                time.sleep(0.8 * (2**attempt))
         raise RuntimeError("KIS 시세 조회 실패") from last_error
 
     def current_price(self, ticker: str) -> dict[str, Any]:

@@ -49,16 +49,41 @@ def load_kis_adapter() -> KoreaInvestmentAdapter:
 
 
 @st.cache_data(ttl=21_600, show_spinner=False)
+def load_kis_ticker_history(ticker: str, name: str) -> pd.DataFrame:
+    """Cache only a successful symbol; raised failures are never cached."""
+    frame, errors = fetch_kis_daily_history(
+        load_kis_adapter(),
+        {ticker: name},
+        max_pages=3,
+    )
+    if ticker in errors:
+        raise RuntimeError(errors[ticker])
+    if frame["date"].nunique() < 180:
+        raise RuntimeError(f"모델 학습용 일봉이 부족합니다 ({frame['date'].nunique()}일).")
+    return frame
+
+
 def load_kis_history_data(
     universe_items: tuple[tuple[str, str], ...],
 ) -> tuple[pd.DataFrame, dict[str, str]]:
-    return fetch_kis_daily_history(load_kis_adapter(), dict(universe_items))
+    frames: list[pd.DataFrame] = []
+    errors: dict[str, str] = {}
+    for ticker, name in universe_items:
+        try:
+            frames.append(load_kis_ticker_history(ticker, name))
+        except Exception as exc:
+            errors[ticker] = str(exc)
+    if not frames:
+        return pd.DataFrame(
+            columns=["date", "ticker", "name", "open", "high", "low", "close", "volume"]
+        ), errors
+    return pd.concat(frames, ignore_index=True), errors
 
 
-@st.cache_data(ttl=30, show_spinner=False)
 def load_kis_snapshot(
     history: pd.DataFrame, universe_items: tuple[tuple[str, str], ...]
 ) -> tuple[pd.DataFrame, dict[str, str]]:
+    # The button is an explicit refresh action, so current quotes are never cached.
     return apply_kis_quote_snapshot(history, load_kis_adapter(), dict(universe_items))
 
 
@@ -103,6 +128,22 @@ def disclaimer(data_label: str) -> None:
         f'<div class="disclaimer"><strong>중요:</strong> 모든 결과는 {source_note}에서 얻은 확률 기반 참고 정보이며, 투자 수익을 보장하지 않습니다. 실제 주문은 사용자가 별도로 판단하고 실행해야 합니다.</div>',
         unsafe_allow_html=True,
     )
+
+
+def render_kis_errors(errors: dict[str, str], universe: dict[str, str]) -> None:
+    if not errors:
+        return
+    st.warning(f"조회 실패 종목: {len(errors)}개")
+    with st.expander("실패한 종목과 상세 사유", expanded=True):
+        error_rows = [
+            {
+                "종목코드": ticker,
+                "종목명": universe.get(ticker, "시장 데이터"),
+                "사유": message,
+            }
+            for ticker, message in errors.items()
+        ]
+        st.dataframe(pd.DataFrame(error_rows), width="stretch", hide_index=True)
 
 
 def recommendation_row(rank: int, row: pd.Series, price_source: str) -> None:
@@ -361,16 +402,22 @@ def main() -> None:
                     "kis_live_updated_at",
                     "kis_live_universe_key",
                     "kis_load_error",
+                    "kis_last_attempted_count",
+                    "kis_last_success_count",
                 ):
                     st.session_state.pop(key, None)
                 try:
                     with st.spinner("KIS 일봉과 현재 시세를 읽고 있습니다..."):
                         history, history_errors = load_kis_history_data(universe_items)
                         live_raw, quote_errors = load_kis_snapshot(history, universe_items)
+                        combined_errors = {**history_errors, **quote_errors}
+                        successful_count = int(live_raw["ticker"].nunique()) if not live_raw.empty else 0
+                        st.session_state["kis_live_errors"] = combined_errors
+                        st.session_state["kis_last_attempted_count"] = len(active_universe)
+                        st.session_state["kis_last_success_count"] = successful_count
                         if live_raw.empty or live_raw["ticker"].nunique() < 3:
                             raise RuntimeError("분석 가능한 종목이 3개 미만입니다.")
                         st.session_state["kis_live_raw"] = live_raw
-                        st.session_state["kis_live_errors"] = {**history_errors, **quote_errors}
                         st.session_state["kis_live_updated_at"] = datetime.now(ZoneInfo("Asia/Seoul"))
                         st.session_state["kis_live_universe_key"] = universe_key
                     st.success("실시간 추천 데이터를 불러왔습니다.")
@@ -385,7 +432,7 @@ def main() -> None:
             else:
                 st.info("위 버튼을 눌러야 KIS 시세가 추천에 반영됩니다.")
         st.markdown("---")
-        st.caption("v1.3.0 · 읽기 전용")
+        st.caption("v1.3.1 · 읽기 전용")
         st.markdown('<div class="mode-note">일봉 모델 + 장중 스냅샷<br>자동주문 영구 비활성화</div>', unsafe_allow_html=True)
 
     use_live = (
@@ -412,9 +459,17 @@ def main() -> None:
         load_error = st.session_state.get("kis_load_error")
         if load_error:
             st.warning(f"최근 조회 실패 사유: {load_error}")
+        attempted_count = st.session_state.get("kis_last_attempted_count")
+        if attempted_count is not None:
+            successful_count = int(st.session_state.get("kis_last_success_count", 0))
+            count_cols = st.columns(3)
+            count_cols[0].metric("조회 시도", f"{attempted_count}종목")
+            count_cols[1].metric("조회 성공", f"{successful_count}종목")
+            count_cols[2].metric("조회 실패", f"{attempted_count - successful_count}종목")
+        render_kis_errors(st.session_state.get("kis_live_errors", {}), active_universe)
         st.info(
             "사이드바에서 분석 대상을 확인한 뒤 '실시간 추천 데이터 불러오기'를 누르세요. "
-            "조회 성공 종목이 3개 미만이면 추천은 생성되지 않습니다."
+            "성공한 종목의 일봉은 6시간 재사용하고 실패한 종목만 다음 클릭에서 다시 조회합니다."
         )
         if page == "매매일지":
             journal_page(active_universe)
@@ -431,17 +486,7 @@ def main() -> None:
         count_cols[1].metric("조회 성공", f"{successful_count}종목")
         count_cols[2].metric("조회 제외", f"{len(active_universe) - successful_count}종목")
     if live_errors:
-        st.warning(f"일부 종목 조회 실패: {len(live_errors)}개. 성공한 종목만 분석했습니다.")
-        with st.expander("제외된 종목과 사유"):
-            error_rows = [
-                {
-                    "종목코드": ticker,
-                    "종목명": active_universe.get(ticker, "시장 데이터"),
-                    "사유": message,
-                }
-                for ticker, message in live_errors.items()
-            ]
-            st.dataframe(pd.DataFrame(error_rows), width="stretch", hide_index=True)
+        render_kis_errors(live_errors, active_universe)
 
     model_result = load_model(featured)
 
