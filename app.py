@@ -13,7 +13,7 @@ from src.backtest import walk_forward_backtest
 from src.config import JOURNAL_PATH, load_settings
 from src.data.demo import DEMO_UNIVERSE, demo_universe_table, make_demo_ohlcv
 from src.data.kis_live import (
-    KIS_STARTER_UNIVERSE,
+    DEFAULT_WATCHLIST,
     apply_kis_quote_snapshot,
     build_analysis_universe,
     fetch_kis_daily_history,
@@ -202,7 +202,7 @@ def scanner_page(
             universe = pd.DataFrame(
                 [
                     {"종목코드": ticker, "종목명": name}
-                    for ticker, name in (analysis_universe or KIS_STARTER_UNIVERSE).items()
+                    for ticker, name in (analysis_universe or DEFAULT_WATCHLIST).items()
                 ]
             )
             st.dataframe(universe, use_container_width=True, hide_index=True)
@@ -244,7 +244,7 @@ def journal_page(analysis_universe: dict[str, str] | None = None) -> None:
         trade_date = cols[0].date_input("일자", value=date.today())
         journal_universe = {
             **DEMO_UNIVERSE,
-            **KIS_STARTER_UNIVERSE,
+            **DEFAULT_WATCHLIST,
             **(analysis_universe or {}),
         }
         name = cols[1].selectbox("종목", list(dict.fromkeys(journal_universe.values())))
@@ -274,7 +274,7 @@ def settings_page(settings, data_label: str) -> None:
     c3.metric("주문 기능", "영구 비활성화")
     st.subheader("환경변수")
     st.code(
-        "APP_KEY=\nAPP_SECRET=\nACCOUNT_NO=\nACCOUNT_PRODUCT_CODE=01\nKIS_MODE=paper\nWATCHLIST=086790:하나금융지주,009150:삼성전기",
+        "APP_KEY=\nAPP_SECRET=\nACCOUNT_NO=\nACCOUNT_PRODUCT_CODE=01\nKIS_MODE=paper\nWATCHLIST=005930:삼성전자,000660:SK하이닉스,051910:LG화학,096770:SK이노베이션,005380:현대차",
         language="bash",
     )
     st.write(f"선택된 연결 모드: **{adapter.mode_label}**")
@@ -303,6 +303,12 @@ def settings_page(settings, data_label: str) -> None:
 def main() -> None:
     settings = load_settings()
     secret_watchlist, secret_watchlist_errors = parse_watchlist(settings.watchlist)
+    if "session_watchlist" not in st.session_state:
+        initial_watchlist = secret_watchlist or DEFAULT_WATCHLIST
+        st.session_state["session_watchlist"] = dict(initial_watchlist)
+        st.session_state["watchlist_editor"] = "\n".join(
+            f"{ticker}:{name}" for ticker, name in initial_watchlist.items()
+        )
     with st.sidebar:
         st.markdown("### 메뉴")
         page = st.radio("페이지", ["오늘의 추천", "종목 스캐너", "백테스트", "매매일지", "설정"], label_visibility="collapsed")
@@ -320,28 +326,24 @@ def main() -> None:
 
         with st.expander("관심종목 설정"):
             with st.form("watchlist_form"):
-                include_starter = st.checkbox("기본 10종목 포함", value=True)
-                watchlist_input = st.text_area(
-                    "추가 관심종목",
+                st.text_area(
+                    "현재 관심종목",
                     placeholder="086790:하나금융지주\n009150:삼성전기",
-                    help="종목코드:종목명 형식으로 쉼표 또는 줄바꿈하여 입력하세요.",
+                    help="종목코드:종목명 형식입니다. 줄을 추가하거나 삭제한 뒤 적용하세요.",
+                    key="watchlist_editor",
                 )
                 apply_watchlist = st.form_submit_button("관심종목 적용", use_container_width=True)
             if apply_watchlist:
-                session_watchlist, input_errors = parse_watchlist(watchlist_input)
+                session_watchlist, input_errors = parse_watchlist(st.session_state["watchlist_editor"])
                 st.session_state["session_watchlist"] = session_watchlist
                 st.session_state["watchlist_input_errors"] = input_errors
                 if input_errors:
                     st.warning("일부 입력을 확인해 주세요.")
                 else:
-                    st.success(f"추가 관심종목 {len(session_watchlist)}개를 적용했습니다.")
+                    st.success(f"관심종목 {len(session_watchlist)}개를 적용했습니다.")
 
         session_watchlist = st.session_state.get("session_watchlist", {})
-        active_universe, truncated = build_analysis_universe(
-            secret_watchlist,
-            session_watchlist,
-            include_starter=include_starter,
-        )
+        active_universe, truncated = build_analysis_universe(session_watchlist)
         universe_items = tuple(active_universe.items())
         universe_key = universe_items
         st.caption(f"현재 분석 대상: {len(active_universe)}종목")
@@ -383,7 +385,7 @@ def main() -> None:
             else:
                 st.info("위 버튼을 눌러야 KIS 시세가 추천에 반영됩니다.")
         st.markdown("---")
-        st.caption("v1.2.1 · 읽기 전용")
+        st.caption("v1.3.0 · 읽기 전용")
         st.markdown('<div class="mode-note">일봉 모델 + 장중 스냅샷<br>자동주문 영구 비활성화</div>', unsafe_allow_html=True)
 
     use_live = (

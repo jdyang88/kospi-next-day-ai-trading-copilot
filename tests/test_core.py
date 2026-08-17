@@ -6,6 +6,7 @@ from src.api.kis_adapter import KoreaInvestmentAdapter
 from src.config import Settings
 from src.data.demo import make_demo_ohlcv
 from src.data.kis_live import (
+    DEFAULT_WATCHLIST,
     apply_kis_quote_snapshot,
     build_analysis_universe,
     fetch_kis_daily_history,
@@ -100,12 +101,27 @@ def test_watchlists_are_validated_deduplicated_and_capped():
     )
     assert parsed["086790"] == "하나금융지주"
     assert len(errors) == 1
-    universe, truncated = build_analysis_universe(
-        parsed, {"005930": "삼성전자(관심)"}, max_size=11
-    )
-    assert universe["005930"] == "삼성전자(관심)"
+    universe, truncated = build_analysis_universe(parsed, {"005930": "삼성전자(관심)"})
+    assert universe == {
+        "005930": "삼성전자(관심)",
+        "086790": "하나금융지주",
+        "009150": "삼성전기",
+    }
+    assert truncated == 0
+    oversized = {f"{index:06d}": f"종목{index}" for index in range(35)}
+    universe, truncated = build_analysis_universe(oversized, max_size=11)
     assert len(universe) == 11
-    assert truncated == 1
+    assert truncated == 24
+
+
+def test_default_watchlist_is_the_requested_editable_five():
+    assert DEFAULT_WATCHLIST == {
+        "005930": "삼성전자",
+        "000660": "SK하이닉스",
+        "051910": "LG화학",
+        "096770": "SK이노베이션",
+        "005380": "현대차",
+    }
 
 
 class _PartiallyFailingMarketData(_FakeMarketData):

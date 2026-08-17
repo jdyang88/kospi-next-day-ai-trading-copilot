@@ -8,20 +8,14 @@ from typing import Mapping, Protocol
 import pandas as pd
 
 
-# A deliberately small, liquid starter universe keeps the first live scan
-# responsive and comfortably below market-data request limits. It can be
-# expanded after the read-only workflow has been observed in production.
-KIS_STARTER_UNIVERSE: dict[str, str] = {
+# Initial editable watchlist shown in a new browser session. This is not an
+# investment recommendation and users can add or remove every item.
+DEFAULT_WATCHLIST: dict[str, str] = {
     "005930": "삼성전자",
     "000660": "SK하이닉스",
-    "373220": "LG에너지솔루션",
-    "207940": "삼성바이오로직스",
+    "051910": "LG화학",
+    "096770": "SK이노베이션",
     "005380": "현대차",
-    "000270": "기아",
-    "068270": "셀트리온",
-    "035420": "NAVER",
-    "105560": "KB금융",
-    "055550": "신한지주",
 }
 
 OHLCV_COLUMNS = ["date", "ticker", "name", "open", "high", "low", "close", "volume"]
@@ -49,11 +43,10 @@ def parse_watchlist(raw: str) -> tuple[dict[str, str], list[str]]:
 
 def build_analysis_universe(
     *watchlists: Mapping[str, str],
-    include_starter: bool = True,
     max_size: int = MAX_UNIVERSE_SIZE,
 ) -> tuple[dict[str, str], int]:
     """Merge watchlists by ticker and cap requests to a safe starter size."""
-    combined: dict[str, str] = dict(KIS_STARTER_UNIVERSE) if include_starter else {}
+    combined: dict[str, str] = {}
     for watchlist in watchlists:
         combined.update(watchlist)
     truncated = max(0, len(combined) - max_size)
@@ -68,7 +61,7 @@ class ReadOnlyMarketData(Protocol):
 
 def fetch_kis_daily_history(
     adapter: ReadOnlyMarketData,
-    universe: Mapping[str, str] = KIS_STARTER_UNIVERSE,
+    universe: Mapping[str, str] = DEFAULT_WATCHLIST,
     *,
     lookback_days: int = 720,
     max_pages: int = 5,
@@ -119,7 +112,7 @@ def fetch_kis_daily_history(
 def apply_kis_quote_snapshot(
     history: pd.DataFrame,
     adapter: ReadOnlyMarketData,
-    universe: Mapping[str, str] = KIS_STARTER_UNIVERSE,
+    universe: Mapping[str, str] = DEFAULT_WATCHLIST,
     *,
     request_pause: float = 0.12,
 ) -> tuple[pd.DataFrame, dict[str, str]]:
