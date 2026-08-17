@@ -105,7 +105,7 @@ def disclaimer(data_label: str) -> None:
     )
 
 
-def recommendation_row(rank: int, row: pd.Series) -> None:
+def recommendation_row(rank: int, row: pd.Series, price_source: str) -> None:
     with st.container(border=True):
         cols = st.columns([2.0, 1.0, 1.05, 1.05, 1.05, 1.2, 3.0], vertical_alignment="center")
         with cols[0]:
@@ -117,7 +117,10 @@ def recommendation_row(rank: int, row: pd.Series) -> None:
             st.markdown(f'<span class="label">상승 확률</span><span class="prob">{pct(row["probability"], 0)}</span>', unsafe_allow_html=True)
             st.progress(float(row["probability"]))
         with cols[2]:
-            st.markdown(f'<span class="label">진입 기준</span><span class="value">{money(row["entry"])}</span>', unsafe_allow_html=True)
+            st.markdown(
+                f'<span class="label">진입 기준 · {price_source}</span><span class="value">{money(row["entry"])}</span>',
+                unsafe_allow_html=True,
+            )
         with cols[3]:
             st.markdown(f'<span class="label">목표가</span><span class="value target">{money(row["target_price"])}</span>', unsafe_allow_html=True)
         with cols[4]:
@@ -141,8 +144,9 @@ def recommendations_page(featured: pd.DataFrame, model_result, data_label: str) 
             st.rerun()
 
     ranked = rank_stocks(featured, model_result)
+    price_source = "KIS 시세" if data_label.startswith("KIS") else "합성 데모"
     for idx, row in ranked.iterrows():
-        recommendation_row(idx + 1, row)
+        recommendation_row(idx + 1, row, price_source)
 
     st.caption("진입 기준은 최신 종가이며 목표가·손절가는 ATR 기반 참고 범위입니다. 장중 갭과 유동성 위험은 별도로 확인하세요.")
     st.divider()
@@ -349,6 +353,14 @@ def main() -> None:
 
         if source == "KIS 실시간":
             if st.button("실시간 추천 데이터 불러오기", type="primary", use_container_width=True):
+                for key in (
+                    "kis_live_raw",
+                    "kis_live_errors",
+                    "kis_live_updated_at",
+                    "kis_live_universe_key",
+                    "kis_load_error",
+                ):
+                    st.session_state.pop(key, None)
                 try:
                     with st.spinner("KIS 일봉과 현재 시세를 읽고 있습니다..."):
                         history, history_errors = load_kis_history_data(universe_items)
@@ -361,6 +373,7 @@ def main() -> None:
                         st.session_state["kis_live_universe_key"] = universe_key
                     st.success("실시간 추천 데이터를 불러왔습니다.")
                 except Exception as exc:
+                    st.session_state["kis_load_error"] = str(exc)
                     st.error(f"KIS 데이터 조회 실패: {exc}")
             updated_at = st.session_state.get("kis_live_updated_at")
             if updated_at:
@@ -370,7 +383,7 @@ def main() -> None:
             else:
                 st.info("위 버튼을 눌러야 KIS 시세가 추천에 반영됩니다.")
         st.markdown("---")
-        st.caption("v1.2.0 · 읽기 전용")
+        st.caption("v1.2.1 · 읽기 전용")
         st.markdown('<div class="mode-note">일봉 모델 + 장중 스냅샷<br>자동주문 영구 비활성화</div>', unsafe_allow_html=True)
 
     use_live = (
@@ -383,12 +396,30 @@ def main() -> None:
         data_label = "KIS 실시간 시세"
         with st.spinner("KIS 시장 데이터를 분석하고 있습니다..."):
             featured = add_technical_features(raw)
-    else:
-        data_label = "합성 데모" if source == "데모" else "합성 데모 미리보기"
+    elif source == "데모":
+        data_label = "합성 데모"
         with st.spinner("데모 시장을 분석하고 있습니다..."):
             _, featured = load_demo_data()
+    else:
+        data_label = "KIS 데이터 없음"
+        featured = None
 
     header(data_label)
+    if featured is None:
+        st.error("실시간 KIS 데이터가 준비되지 않아 추천 종목과 가격을 표시하지 않습니다.")
+        load_error = st.session_state.get("kis_load_error")
+        if load_error:
+            st.warning(f"최근 조회 실패 사유: {load_error}")
+        st.info(
+            "사이드바에서 분석 대상을 확인한 뒤 '실시간 추천 데이터 불러오기'를 누르세요. "
+            "조회 성공 종목이 3개 미만이면 추천은 생성되지 않습니다."
+        )
+        if page == "매매일지":
+            journal_page(active_universe)
+        elif page == "설정":
+            settings_page(settings, data_label)
+        return
+
     disclaimer(data_label)
     live_errors = st.session_state.get("kis_live_errors", {}) if use_live else {}
     if use_live:
