@@ -432,7 +432,7 @@ def main() -> None:
             else:
                 st.info("위 버튼을 눌러야 KIS 시세가 추천에 반영됩니다.")
         st.markdown("---")
-        st.caption("v1.3.1 · 읽기 전용")
+        st.caption("v1.3.2 · 읽기 전용")
         st.markdown('<div class="mode-note">일봉 모델 + 장중 스냅샷<br>자동주문 영구 비활성화</div>', unsafe_allow_html=True)
 
     use_live = (
@@ -442,7 +442,7 @@ def main() -> None:
     )
     if use_live:
         raw = st.session_state["kis_live_raw"]
-        data_label = "KIS 실시간 시세"
+        data_label = "KIS 최신 시세"
         with st.spinner("KIS 시장 데이터를 분석하고 있습니다..."):
             featured = add_technical_features(raw)
     elif source == "데모":

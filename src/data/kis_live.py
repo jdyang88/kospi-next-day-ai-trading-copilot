@@ -115,6 +115,7 @@ def apply_kis_quote_snapshot(
     universe: Mapping[str, str] = DEFAULT_WATCHLIST,
     *,
     request_pause: float = 0.12,
+    now: pd.Timestamp | None = None,
 ) -> tuple[pd.DataFrame, dict[str, str]]:
     """Replace each symbol's latest daily row with the current KIS OHLCV snapshot."""
     if history.empty:
@@ -122,6 +123,12 @@ def apply_kis_quote_snapshot(
 
     snapshots: list[dict] = []
     errors: dict[str, str] = {}
+    now_kst = now or pd.Timestamp.now(tz="Asia/Seoul")
+    if now_kst.tzinfo is None:
+        now_kst = now_kst.tz_localize("Asia/Seoul")
+    else:
+        now_kst = now_kst.tz_convert("Asia/Seoul")
+    market_has_started = now_kst.weekday() < 5 and now_kst.hour >= 9
     for ticker, name in universe.items():
         ticker_history = history[history["ticker"] == ticker]
         if ticker_history.empty:
@@ -135,14 +142,25 @@ def apply_kis_quote_snapshot(
                 "close": pd.to_numeric(quote.get("stck_prpr"), errors="coerce"),
                 "volume": pd.to_numeric(quote.get("acml_vol"), errors="coerce"),
             }
+            latest_history = ticker_history.sort_values("date").iloc[-1]
+            invalid_columns = [
+                column for column, value in values.items() if pd.isna(value) or value <= 0
+            ]
+            if invalid_columns and not market_has_started:
+                # Before the Korean market opens (and on weekends), KIS can
+                # return the latest close while today's OHLCV fields are zero.
+                # Use the latest confirmed KIS daily bar instead of rejecting
+                # an otherwise valid symbol or inventing today's bar.
+                for column in invalid_columns:
+                    values[column] = pd.to_numeric(latest_history[column], errors="coerce")
             if any(pd.isna(value) or value <= 0 for value in values.values()):
                 raise RuntimeError("현재가 응답의 OHLCV 값이 불완전합니다.")
 
             # On weekends/holidays the quote represents the latest business day.
             # Replacing that row avoids inventing a non-trading date.
             snapshot_date = pd.Timestamp(ticker_history["date"].max()).normalize()
-            today = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
-            if today.weekday() < 5:
+            today = now_kst.tz_localize(None).normalize()
+            if market_has_started:
                 snapshot_date = max(snapshot_date, today)
             snapshots.append({"date": snapshot_date, "ticker": ticker, "name": name, **values})
         except Exception as exc:

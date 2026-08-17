@@ -141,3 +141,33 @@ def test_failed_live_quote_is_excluded_from_analysis():
     )
     assert set(live["ticker"]) == {"005930"}
     assert "000660" in errors
+
+
+class _PreMarketData(_FakeMarketData):
+    def current_price(self, ticker):
+        return {
+            "stck_oprc": "0",
+            "stck_hgpr": "0",
+            "stck_lwpr": "0",
+            "stck_prpr": "71500",
+            "acml_vol": "0",
+        }
+
+
+def test_pre_market_zero_fields_use_latest_confirmed_daily_bar():
+    universe = {"005930": "삼성전자"}
+    history, _ = fetch_kis_daily_history(
+        _FakeMarketData(), universe, max_pages=2, request_pause=0
+    )
+    live, errors = apply_kis_quote_snapshot(
+        history,
+        _PreMarketData(),
+        universe,
+        request_pause=0,
+        now=pd.Timestamp("2026-08-18 08:00:00", tz="Asia/Seoul"),
+    )
+    latest = live.sort_values("date").iloc[-1]
+    assert not errors
+    assert latest["close"] == 71_500
+    assert latest["open"] == 50_000
+    assert latest["volume"] > 0
