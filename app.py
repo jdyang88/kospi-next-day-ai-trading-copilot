@@ -223,6 +223,23 @@ def settings_page(settings) -> None:
     st.code("APP_KEY=\nAPP_SECRET=\nACCOUNT_NO=\nACCOUNT_PRODUCT_CODE=01\nKIS_MODE=paper", language="bash")
     st.write(f"선택된 연결 모드: **{adapter.mode_label}**")
     st.warning("실전 모드를 선택해도 이 프로젝트는 주문 API를 호출하지 않습니다. 실제 주문은 한국투자증권 앱에서 직접 실행하세요.")
+
+    st.subheader("API 연결 확인")
+    st.caption("삼성전자(005930) 현재가를 한 번 조회해 인증과 시세 연결만 확인합니다. 주문은 발생하지 않습니다.")
+    if st.button("한국투자증권 API 연결 테스트", type="primary", disabled=not settings.credentials_ready):
+        try:
+            with st.spinner("한국투자증권 시세 서버에 연결하고 있습니다..."):
+                quote = adapter.current_price("005930")
+            current_price = pd.to_numeric(quote.get("stck_prpr"), errors="coerce")
+            if pd.isna(current_price):
+                st.success(f"API 인증 성공 ({adapter.mode_label})")
+                st.json({"종목코드": "005930", "응답": "시세 응답 수신"})
+            else:
+                st.success(f"API 연결 성공 · 삼성전자 현재가 {current_price:,.0f}원 ({adapter.mode_label})")
+        except Exception as exc:
+            st.error(f"연결 실패: {exc}")
+            st.caption("모의투자 키에는 KIS_MODE=paper, 실전투자 키에는 KIS_MODE=live를 사용했는지 확인하세요.")
+
     st.subheader("15:10 연동 확장점")
     st.markdown("`src/api/kis_adapter.py`의 읽기 전용 REST 어댑터 옆에 WebSocket 수집기를 추가하고, 매 거래일 15:10 특징 스냅샷을 별도 저장소에 적재하도록 설계할 수 있습니다.")
 

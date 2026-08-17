@@ -53,7 +53,7 @@ ACCOUNT_PRODUCT_CODE=01
 KIS_MODE=paper
 ```
 
-현재 UI는 항상 데모 데이터로 안전하게 실행되며, `src/api/kis_adapter.py`는 인증·현재가·일봉 조회만 제공합니다. `submit_order()`는 항상 예외를 발생시켜 자동주문을 차단합니다. 먼저 모의투자 환경에서 데이터 조회만 검증하세요.
+현재 추천 UI는 데모 데이터로 안전하게 실행되며, 설정 화면의 **한국투자증권 API 연결 테스트**에서 인증과 삼성전자 현재가 조회를 확인할 수 있습니다. Streamlit Community Cloud에서는 같은 이름의 앱 Secrets를 읽습니다. `src/api/kis_adapter.py`는 인증·현재가·일봉 조회만 제공하고 `submit_order()`는 항상 예외를 발생시켜 자동주문을 차단합니다. 먼저 모의투자 환경에서 데이터 조회만 검증하세요.
 
 ## 데이터와 15:10 제약
 

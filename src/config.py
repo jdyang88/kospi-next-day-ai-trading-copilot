@@ -28,13 +28,25 @@ class Settings:
 
 def load_settings() -> Settings:
     load_dotenv(ROOT_DIR / ".env")
+
+    # Streamlit Community Cloud exposes encrypted app secrets through
+    # st.secrets, while local development continues to use .env variables.
+    try:
+        import streamlit as st
+
+        cloud_secrets = dict(st.secrets)
+    except (ImportError, FileNotFoundError, RuntimeError):
+        cloud_secrets = {}
+
+    def value(name: str, default: str = "") -> str:
+        return str(os.getenv(name) or cloud_secrets.get(name, default)).strip()
+
     return Settings(
-        app_key=os.getenv("APP_KEY", "").strip(),
-        app_secret=os.getenv("APP_SECRET", "").strip(),
-        account_no=os.getenv("ACCOUNT_NO", "").strip(),
-        account_product_code=os.getenv("ACCOUNT_PRODUCT_CODE", "01").strip(),
-        paper_trading=os.getenv("KIS_MODE", "paper").lower() != "live",
+        app_key=value("APP_KEY"),
+        app_secret=value("APP_SECRET"),
+        account_no=value("ACCOUNT_NO"),
+        account_product_code=value("ACCOUNT_PRODUCT_CODE", "01"),
+        paper_trading=value("KIS_MODE", "paper").lower() != "live",
         # Safety invariant: this MVP never enables order submission.
         auto_trading_enabled=False,
     )
-
