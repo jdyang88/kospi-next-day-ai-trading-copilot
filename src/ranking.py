@@ -9,6 +9,10 @@ from src.model import ModelResult, predict_upside
 
 CONFIDENCE_LABELS = ["관찰", "보통", "높음", "매우 높음"]
 CONFIDENCE_LEVELS = {label: level for level, label in enumerate(CONFIDENCE_LABELS, start=1)}
+CONFIDENCE_GUIDE = (
+    "1/4 관찰(54% 이하) → 2/4 보통(54% 초과, 62% 이하) → "
+    "3/4 높음(62% 초과, 70% 이하) → 4/4 매우 높음(70% 초과)"
+)
 
 
 def _reason(row: pd.Series) -> str:

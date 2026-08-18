@@ -22,7 +22,7 @@ from src.data.kis_live import (
 from src.features import FEATURE_COLUMNS, add_technical_features, latest_feature_rows
 from src.journal import append_trade, load_journal
 from src.model import train_direction_model
-from src.ranking import rank_stocks
+from src.ranking import CONFIDENCE_GUIDE, rank_stocks
 from src.ui.styles import APP_CSS
 
 
@@ -206,8 +206,7 @@ def recommendations_page(featured: pd.DataFrame, model_result, data_label: str) 
         recommendation_row(idx + 1, row, price_source)
 
     st.caption(
-        "상승확률 단계: 1/4 관찰(54% 이하) → 2/4 보통(54% 초과~62% 이하) → "
-        "3/4 높음(62% 초과~70% 이하) → 4/4 매우 높음(70% 초과). "
+        f"상승확률 단계: {CONFIDENCE_GUIDE}. "
         "단계가 높을수록 모델의 상승확률이 높지만 실제 수익을 보장하지 않습니다."
     )
     st.caption("진입 기준은 최신 종가이며 목표가·손절가는 ATR 기반 참고 범위입니다. 장중 갭과 유동성 위험은 별도로 확인하세요.")
@@ -476,7 +475,7 @@ def main() -> None:
             else:
                 st.info("위 버튼을 눌러야 KIS 시세가 추천에 반영됩니다.")
         st.markdown("---")
-        st.caption("v1.4.3 · 읽기 전용")
+        st.caption("v1.4.4 · 읽기 전용")
         st.markdown('<div class="mode-note">일봉 모델 + 장중 스냅샷<br>자동주문 영구 비활성화</div>', unsafe_allow_html=True)
 
     use_live = (

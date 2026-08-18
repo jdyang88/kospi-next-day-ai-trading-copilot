@@ -14,7 +14,7 @@ from src.data.kis_live import (
 )
 from src.features import FEATURE_COLUMNS, add_technical_features, latest_feature_rows
 from src.model import train_direction_model
-from src.ranking import rank_stocks
+from src.ranking import CONFIDENCE_GUIDE, rank_stocks
 
 
 def test_feature_pipeline_and_latest_rows():
@@ -39,6 +39,11 @@ def test_model_ranking_outputs_risk_levels():
     assert ranked["confidence_level"].between(1, 4).all()
     assert (ranked["target_price"] > ranked["entry"]).all()
     assert (ranked["stop_price"] < ranked["entry"]).all()
+
+
+def test_confidence_guide_does_not_trigger_markdown_strikethrough():
+    assert "~" not in CONFIDENCE_GUIDE
+    assert all(label in CONFIDENCE_GUIDE for label in ["관찰", "보통", "높음", "매우 높음"])
 
 
 def test_walk_forward_backtest_has_costs_and_equity():
