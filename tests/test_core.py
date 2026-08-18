@@ -30,6 +30,9 @@ def test_model_ranking_outputs_risk_levels():
     featured = add_technical_features(make_demo_ohlcv(periods=420))
     result = train_direction_model(featured, validation_days=60)
     ranked = rank_stocks(featured, result)
+    assert result.train_end < result.validation_start
+    assert 0 <= result.auc <= 1
+    assert 0 <= result.accuracy <= 1
     assert len(ranked) == 5
     assert ranked["probability"].between(0, 1).all()
     assert (ranked["target_price"] > ranked["entry"]).all()

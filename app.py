@@ -184,6 +184,18 @@ def recommendations_page(featured: pd.DataFrame, model_result, data_label: str) 
             st.cache_resource.clear()
             st.rerun()
 
+    with st.expander("상승 확률은 어떻게 계산하나요?"):
+        st.markdown(
+            """
+- **예측 대상:** 오늘까지의 정보로 **다음 거래일 종가가 오늘 종가보다 높을 확률**을 추정합니다.
+- **입력 정보:** 1·5·20일 수익률, 이동평균선과의 괴리, RSI, MACD, 볼린저밴드, ATR, 거래량 비율, 시장 대비 상대강도를 사용합니다.
+- **학습·검증:** 과거 데이터는 시간순으로 나누며, 최근 검증 구간을 학습에서 제외해 미래 정보를 미리 보는 오류를 방지합니다.
+- **표시 방법:** 모델의 상승 확률을 기준으로 종목을 정렬해 상위 5개를 보여줍니다.
+
+상승 확률은 **예상 수익률이나 수익 보장 수치가 아닙니다.** 예를 들어 60%는 과거 패턴을 학습한 모델이 상승 쪽에 0.60의 확률을 부여했다는 뜻이며, 상승 폭의 크기는 나타내지 않습니다.
+            """
+        )
+
     ranked = rank_stocks(featured, model_result)
     price_source = "KIS 시세" if data_label.startswith("KIS") else "합성 데모"
     for idx, row in ranked.iterrows():
@@ -195,9 +207,32 @@ def recommendations_page(featured: pd.DataFrame, model_result, data_label: str) 
     with left:
         st.subheader("모델 검증")
         m1, m2, m3 = st.columns(3)
-        m1.metric("검증 AUC", f"{model_result.auc:.3f}")
-        m2.metric("방향 정확도", pct(model_result.accuracy))
-        m3.metric("사용 모델", model_result.model_name)
+        model_display_name = {
+            "RandomForest (fallback)": "RF",
+        }.get(model_result.model_name, model_result.model_name)
+        m1.metric(
+            "검증 AUC",
+            f"{model_result.auc:.3f}",
+            help="상승 종목을 하락 종목보다 높게 평가하는 능력입니다. 0.5는 무작위 수준, 1.0은 이상적인 구분을 뜻합니다.",
+        )
+        m2.metric(
+            "방향 정확도",
+            pct(model_result.accuracy),
+            help="검증 구간에서 상승 확률 50%를 기준으로 상승·하락 방향을 맞힌 비율입니다.",
+        )
+        m3.metric(
+            "사용 모델",
+            model_display_name,
+            help="LightGBM을 우선 사용하며, 설치되지 않은 경우 XGBoost, RandomForest 순으로 대체합니다.",
+        )
+        st.caption(
+            "AUC는 종목의 상대적 순위 구분 능력, 방향 정확도는 50% 기준의 정답 비율입니다. "
+            f"현재 사용 모델은 {model_result.model_name}이며, 실행 환경에서 실제 학습에 사용된 알고리즘입니다."
+        )
+        st.caption(
+            f"시간순 검증 · 학습 데이터 종료 {model_result.train_end:%Y-%m-%d} · "
+            f"검증 시작 {model_result.validation_start:%Y-%m-%d}"
+        )
         importance = model_result.feature_importance.head(8).sort_values("importance")
         fig = px.bar(importance, x="importance", y="feature", orientation="h", color_discrete_sequence=["#087443"])
         fig.update_layout(height=310, margin=dict(l=0, r=10, t=15, b=0), xaxis_title=None, yaxis_title=None)
@@ -432,7 +467,7 @@ def main() -> None:
             else:
                 st.info("위 버튼을 눌러야 KIS 시세가 추천에 반영됩니다.")
         st.markdown("---")
-        st.caption("v1.4.0 · 읽기 전용")
+        st.caption("v1.4.1 · 읽기 전용")
         st.markdown('<div class="mode-note">일봉 모델 + 장중 스냅샷<br>자동주문 영구 비활성화</div>', unsafe_allow_html=True)
 
     use_live = (
