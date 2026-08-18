@@ -21,6 +21,8 @@ DEFAULT_WATCHLIST: dict[str, str] = {
     "034730": "SK",
     "000720": "현대건설",
     "068270": "셀트리온",
+    "006260": "LS",
+    "207940": "삼성바이오로직스",
 }
 
 OHLCV_COLUMNS = ["date", "ticker", "name", "open", "high", "low", "close", "volume"]

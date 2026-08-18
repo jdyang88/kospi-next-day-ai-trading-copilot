@@ -350,7 +350,7 @@ def settings_page(settings, data_label: str) -> None:
     c3.metric("주문 기능", "영구 비활성화")
     st.subheader("환경변수")
     st.code(
-        "APP_KEY=\nAPP_SECRET=\nACCOUNT_NO=\nACCOUNT_PRODUCT_CODE=01\nKIS_MODE=paper\nWATCHLIST=005930:삼성전자,000660:SK하이닉스,051910:LG화학,096770:SK이노베이션,005380:현대차,069500:KODEX 200,035420:NAVER,034730:SK,000720:현대건설,068270:셀트리온",
+        "APP_KEY=\nAPP_SECRET=\nACCOUNT_NO=\nACCOUNT_PRODUCT_CODE=01\nKIS_MODE=paper\nWATCHLIST=005930:삼성전자,000660:SK하이닉스,051910:LG화학,096770:SK이노베이션,005380:현대차,069500:KODEX 200,035420:NAVER,034730:SK,000720:현대건설,068270:셀트리온,006260:LS,207940:삼성바이오로직스",
         language="bash",
     )
     st.write(f"선택된 연결 모드: **{adapter.mode_label}**")
@@ -467,7 +467,7 @@ def main() -> None:
             else:
                 st.info("위 버튼을 눌러야 KIS 시세가 추천에 반영됩니다.")
         st.markdown("---")
-        st.caption("v1.4.1 · 읽기 전용")
+        st.caption("v1.4.2 · 읽기 전용")
         st.markdown('<div class="mode-note">일봉 모델 + 장중 스냅샷<br>자동주문 영구 비활성화</div>', unsafe_allow_html=True)
 
     use_live = (
