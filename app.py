@@ -21,6 +21,7 @@ from src.data.kis_live import (
 )
 from src.features import (
     FEATURE_COLUMNS,
+    FEATURE_DESCRIPTIONS,
     FEATURE_LABELS,
     add_technical_features,
     equal_weight_market_index,
@@ -250,7 +251,8 @@ def recommendations_page(featured: pd.DataFrame, model_result, data_label: str) 
         st.markdown("**모델이 중요하게 본 지표**")
         st.caption(
             "막대가 길수록 모델이 상승확률을 계산할 때 상대적으로 많이 활용한 지표입니다. "
-            "중요도가 높다고 그 지표가 상승 방향으로 작용했다는 뜻은 아닙니다."
+            "중요도가 높다고 그 지표가 상승 방향으로 작용했다는 뜻은 아닙니다. "
+            "각 막대에 마우스를 올리면 지표 설명을 볼 수 있습니다."
         )
         importance = model_result.feature_importance.copy()
         importance_total = importance["importance"].clip(lower=0).sum()
@@ -260,6 +262,7 @@ def recommendations_page(featured: pd.DataFrame, model_result, data_label: str) 
             else 0.0
         )
         importance["지표"] = importance["feature"].map(FEATURE_LABELS).fillna(importance["feature"])
+        importance["설명"] = importance["feature"].map(FEATURE_DESCRIPTIONS).fillna("기술지표 설명이 준비되지 않았습니다.")
         importance = importance.head(8).sort_values("importance_pct")
         fig = px.bar(
             importance,
@@ -267,8 +270,11 @@ def recommendations_page(featured: pd.DataFrame, model_result, data_label: str) 
             y="지표",
             orientation="h",
             color_discrete_sequence=["#087443"],
+            custom_data=["설명"],
         )
-        fig.update_traces(hovertemplate="%{y}<br>중요도 비중 %{x:.1f}%<extra></extra>")
+        fig.update_traces(
+            hovertemplate="<b>%{y}</b><br>%{customdata[0]}<br><br>중요도 비중 %{x:.1f}%<extra></extra>"
+        )
         fig.update_layout(
             height=310,
             margin=dict(l=0, r=10, t=15, b=0),
@@ -276,6 +282,10 @@ def recommendations_page(featured: pd.DataFrame, model_result, data_label: str) 
             yaxis_title=None,
         )
         st.plotly_chart(fig, width="stretch")
+        with st.expander("기술지표 용어 설명"):
+            st.caption("마우스 사용이 어려운 모바일에서는 모델이 사용할 수 있는 14개 지표의 설명을 확인하세요.")
+            for feature in FEATURE_COLUMNS:
+                st.markdown(f"**{FEATURE_LABELS[feature]}** — {FEATURE_DESCRIPTIONS[feature]}")
     with right:
         st.subheader("분석종목 평균 흐름")
         st.caption(
@@ -516,7 +526,7 @@ def main() -> None:
             else:
                 st.info("위 버튼을 눌러야 KIS 시세가 추천에 반영됩니다.")
         st.markdown("---")
-        st.caption("v1.5.0 · 읽기 전용")
+        st.caption("v1.5.1 · 읽기 전용")
         st.markdown('<div class="mode-note">일봉 모델 + 장중 스냅샷<br>자동주문 영구 비활성화</div>', unsafe_allow_html=True)
 
     use_live = (

@@ -14,6 +14,7 @@ from src.data.kis_live import (
 )
 from src.features import (
     FEATURE_COLUMNS,
+    FEATURE_DESCRIPTIONS,
     FEATURE_LABELS,
     add_technical_features,
     equal_weight_market_index,
@@ -31,6 +32,8 @@ def test_feature_pipeline_and_latest_rows():
     assert set(FEATURE_COLUMNS).issubset(featured.columns)
     assert np.isfinite(latest[FEATURE_COLUMNS].to_numpy()).all()
     assert set(FEATURE_LABELS) == set(FEATURE_COLUMNS)
+    assert set(FEATURE_DESCRIPTIONS) == set(FEATURE_COLUMNS)
+    assert all(len(description) >= 20 for description in FEATURE_DESCRIPTIONS.values())
 
 
 def test_equal_weight_market_index_is_recent_and_rebased_to_100():
