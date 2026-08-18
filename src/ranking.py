@@ -7,6 +7,10 @@ from src.features import latest_feature_rows
 from src.model import ModelResult, predict_upside
 
 
+CONFIDENCE_LABELS = ["관찰", "보통", "높음", "매우 높음"]
+CONFIDENCE_LEVELS = {label: level for level, label in enumerate(CONFIDENCE_LABELS, start=1)}
+
+
 def _reason(row: pd.Series) -> str:
     signals: list[str] = []
     if row["ma_20_gap"] > 0:
@@ -37,8 +41,8 @@ def rank_stocks(featured: pd.DataFrame, result: ModelResult, top_n: int = 5) -> 
     latest["target_price"] = latest["entry"] * (1 + reward)
     latest["stop_price"] = latest["entry"] * (1 - risk)
     latest["confidence"] = pd.cut(
-        latest["probability"], bins=[-np.inf, 0.54, 0.62, 0.70, np.inf], labels=["관찰", "보통", "높음", "매우 높음"]
+        latest["probability"], bins=[-np.inf, 0.54, 0.62, 0.70, np.inf], labels=CONFIDENCE_LABELS
     ).astype(str)
+    latest["confidence_level"] = latest["confidence"].map(CONFIDENCE_LEVELS).astype(int)
     latest["reason"] = latest.apply(_reason, axis=1)
     return latest.sort_values(["score", "probability"], ascending=False).head(top_n).reset_index(drop=True)
-

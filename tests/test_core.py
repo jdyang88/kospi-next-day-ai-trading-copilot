@@ -35,6 +35,8 @@ def test_model_ranking_outputs_risk_levels():
     assert 0 <= result.accuracy <= 1
     assert len(ranked) == 5
     assert ranked["probability"].between(0, 1).all()
+    assert ranked["confidence"].isin(["관찰", "보통", "높음", "매우 높음"]).all()
+    assert ranked["confidence_level"].between(1, 4).all()
     assert (ranked["target_price"] > ranked["entry"]).all()
     assert (ranked["stop_price"] < ranked["entry"]).all()
 

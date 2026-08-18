@@ -167,7 +167,10 @@ def recommendation_row(rank: int, row: pd.Series, price_source: str) -> None:
         with cols[4]:
             st.markdown(f'<span class="label">손절가</span><span class="value stop">{money(row["stop_price"])}</span>', unsafe_allow_html=True)
         with cols[5]:
-            st.markdown(f'<span class="label">신뢰도</span><span class="confidence">{row["confidence"]}</span>', unsafe_allow_html=True)
+            st.markdown(
+                f'<span class="label">상승확률 단계</span><span class="confidence">{row["confidence_level"]}/4 · {row["confidence"]}</span>',
+                unsafe_allow_html=True,
+            )
         with cols[6]:
             st.markdown(f'<span class="label">선정 이유</span><span class="reason">{row["reason"]}</span>', unsafe_allow_html=True)
 
@@ -191,6 +194,7 @@ def recommendations_page(featured: pd.DataFrame, model_result, data_label: str) 
 - **입력 정보:** 1·5·20일 수익률, 이동평균선과의 괴리, RSI, MACD, 볼린저밴드, ATR, 거래량 비율, 시장 대비 상대강도를 사용합니다.
 - **학습·검증:** 과거 데이터는 시간순으로 나누며, 최근 검증 구간을 학습에서 제외해 미래 정보를 미리 보는 오류를 방지합니다.
 - **표시 방법:** 모델의 상승 확률을 기준으로 종목을 정렬해 상위 5개를 보여줍니다.
+- **확률 단계:** 상승확률을 읽기 쉽게 4개 구간으로 나눈 보조 표시이며, 별도로 계산한 모델 신뢰성이나 수익 보장이 아닙니다.
 
 상승 확률은 **예상 수익률이나 수익 보장 수치가 아닙니다.** 예를 들어 60%는 과거 패턴을 학습한 모델이 상승 쪽에 0.60의 확률을 부여했다는 뜻이며, 상승 폭의 크기는 나타내지 않습니다.
             """
@@ -201,6 +205,11 @@ def recommendations_page(featured: pd.DataFrame, model_result, data_label: str) 
     for idx, row in ranked.iterrows():
         recommendation_row(idx + 1, row, price_source)
 
+    st.caption(
+        "상승확률 단계: 1/4 관찰(54% 이하) → 2/4 보통(54% 초과~62% 이하) → "
+        "3/4 높음(62% 초과~70% 이하) → 4/4 매우 높음(70% 초과). "
+        "단계가 높을수록 모델의 상승확률이 높지만 실제 수익을 보장하지 않습니다."
+    )
     st.caption("진입 기준은 최신 종가이며 목표가·손절가는 ATR 기반 참고 범위입니다. 장중 갭과 유동성 위험은 별도로 확인하세요.")
     st.divider()
     left, right = st.columns([1.15, 1], gap="large")
@@ -467,7 +476,7 @@ def main() -> None:
             else:
                 st.info("위 버튼을 눌러야 KIS 시세가 추천에 반영됩니다.")
         st.markdown("---")
-        st.caption("v1.4.2 · 읽기 전용")
+        st.caption("v1.4.3 · 읽기 전용")
         st.markdown('<div class="mode-note">일봉 모델 + 장중 스냅샷<br>자동주문 영구 비활성화</div>', unsafe_allow_html=True)
 
     use_live = (
