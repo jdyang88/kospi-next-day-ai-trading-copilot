@@ -21,6 +21,23 @@ FEATURE_COLUMNS = [
     "relative_strength_20",
 ]
 
+FEATURE_LABELS = {
+    "ret_1d": "1일 수익률",
+    "ret_5d": "5일 수익률",
+    "ret_20d": "20일 수익률",
+    "ma_5_gap": "5일 이동평균 괴리",
+    "ma_20_gap": "20일 이동평균 괴리",
+    "ma_60_gap": "60일 이동평균 괴리",
+    "rsi_14": "RSI(14)",
+    "macd": "MACD",
+    "macd_signal": "MACD 신호선",
+    "bb_position": "볼린저밴드 내 위치",
+    "bb_width": "볼린저밴드 폭",
+    "atr_pct": "ATR 변동성 비율",
+    "volume_ratio_20": "20일 평균 대비 거래량",
+    "relative_strength_20": "시장 대비 20일 상대강도",
+}
+
 
 def _rsi(close: pd.Series, window: int = 14) -> pd.Series:
     delta = close.diff()
@@ -81,3 +98,18 @@ def add_technical_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
 def latest_feature_rows(featured: pd.DataFrame) -> pd.DataFrame:
     valid = featured.dropna(subset=FEATURE_COLUMNS)
     return valid.sort_values("date").groupby("ticker", as_index=False).tail(1).copy()
+
+
+def equal_weight_market_index(featured: pd.DataFrame, window: int = 120) -> pd.Series:
+    """Return a recent equal-weight index rebased to 100 at the first displayed date."""
+    market_return = (
+        featured.pivot(index="date", columns="ticker", values="close")
+        .pct_change(fill_method=None)
+        .mean(axis=1)
+        .fillna(0)
+        .tail(window)
+    )
+    index = (1 + market_return).cumprod()
+    if index.empty or index.iloc[0] == 0:
+        return index
+    return index / index.iloc[0] * 100

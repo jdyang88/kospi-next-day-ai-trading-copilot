@@ -19,7 +19,13 @@ from src.data.kis_live import (
     fetch_kis_daily_history,
     parse_watchlist,
 )
-from src.features import FEATURE_COLUMNS, add_technical_features, latest_feature_rows
+from src.features import (
+    FEATURE_COLUMNS,
+    FEATURE_LABELS,
+    add_technical_features,
+    equal_weight_market_index,
+    latest_feature_rows,
+)
 from src.journal import append_trade, load_journal
 from src.model import train_direction_model
 from src.ranking import CONFIDENCE_GUIDE, rank_stocks
@@ -241,17 +247,52 @@ def recommendations_page(featured: pd.DataFrame, model_result, data_label: str) 
             f"시간순 검증 · 학습 데이터 종료 {model_result.train_end:%Y-%m-%d} · "
             f"검증 시작 {model_result.validation_start:%Y-%m-%d}"
         )
-        importance = model_result.feature_importance.head(8).sort_values("importance")
-        fig = px.bar(importance, x="importance", y="feature", orientation="h", color_discrete_sequence=["#087443"])
-        fig.update_layout(height=310, margin=dict(l=0, r=10, t=15, b=0), xaxis_title=None, yaxis_title=None)
-        st.plotly_chart(fig, use_container_width=True)
+        st.markdown("**모델이 중요하게 본 지표**")
+        st.caption(
+            "막대가 길수록 모델이 상승확률을 계산할 때 상대적으로 많이 활용한 지표입니다. "
+            "중요도가 높다고 그 지표가 상승 방향으로 작용했다는 뜻은 아닙니다."
+        )
+        importance = model_result.feature_importance.copy()
+        importance_total = importance["importance"].clip(lower=0).sum()
+        importance["importance_pct"] = (
+            importance["importance"].clip(lower=0) / importance_total * 100
+            if importance_total > 0
+            else 0.0
+        )
+        importance["지표"] = importance["feature"].map(FEATURE_LABELS).fillna(importance["feature"])
+        importance = importance.head(8).sort_values("importance_pct")
+        fig = px.bar(
+            importance,
+            x="importance_pct",
+            y="지표",
+            orientation="h",
+            color_discrete_sequence=["#087443"],
+        )
+        fig.update_traces(hovertemplate="%{y}<br>중요도 비중 %{x:.1f}%<extra></extra>")
+        fig.update_layout(
+            height=310,
+            margin=dict(l=0, r=10, t=15, b=0),
+            xaxis_title="전체 중요도 중 비중(%)",
+            yaxis_title=None,
+        )
+        st.plotly_chart(fig, width="stretch")
     with right:
-        st.subheader("최근 시장 흐름")
-        market = featured.pivot(index="date", columns="ticker", values="close").pct_change(fill_method=None).mean(axis=1)
-        index = (1 + market.fillna(0)).cumprod().tail(120) * 100
+        st.subheader("분석종목 평균 흐름")
+        st.caption(
+            "현재 분석 대상 종목을 같은 비중으로 평균한 최근 120거래일의 흐름입니다. "
+            "첫날을 100으로 놓으므로 110은 평균 약 10% 상승, 90은 약 10% 하락을 뜻합니다. "
+            "실제 KOSPI 지수는 아닙니다."
+        )
+        index = equal_weight_market_index(featured, window=120)
         fig = go.Figure(go.Scatter(x=index.index, y=index, mode="lines", line=dict(color="#087443", width=2), fill="tozeroy", fillcolor="rgba(8,116,67,.08)"))
-        fig.update_layout(height=310, margin=dict(l=0, r=10, t=15, b=0), yaxis_title="합성 시장지수", showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
+        fig.add_hline(y=100, line_dash="dot", line_color="#98a2b3", annotation_text="기준 100")
+        fig.update_layout(
+            height=310,
+            margin=dict(l=0, r=10, t=15, b=0),
+            yaxis_title="분석종목 평균지수(시작=100)",
+            showlegend=False,
+        )
+        st.plotly_chart(fig, width="stretch")
 
 
 def scanner_page(
@@ -475,7 +516,7 @@ def main() -> None:
             else:
                 st.info("위 버튼을 눌러야 KIS 시세가 추천에 반영됩니다.")
         st.markdown("---")
-        st.caption("v1.4.4 · 읽기 전용")
+        st.caption("v1.5.0 · 읽기 전용")
         st.markdown('<div class="mode-note">일봉 모델 + 장중 스냅샷<br>자동주문 영구 비활성화</div>', unsafe_allow_html=True)
 
     use_live = (

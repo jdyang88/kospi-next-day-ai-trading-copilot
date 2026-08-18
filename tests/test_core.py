@@ -12,7 +12,13 @@ from src.data.kis_live import (
     fetch_kis_daily_history,
     parse_watchlist,
 )
-from src.features import FEATURE_COLUMNS, add_technical_features, latest_feature_rows
+from src.features import (
+    FEATURE_COLUMNS,
+    FEATURE_LABELS,
+    add_technical_features,
+    equal_weight_market_index,
+    latest_feature_rows,
+)
 from src.model import train_direction_model
 from src.ranking import CONFIDENCE_GUIDE, rank_stocks
 
@@ -24,6 +30,15 @@ def test_feature_pipeline_and_latest_rows():
     assert len(latest) == raw["ticker"].nunique()
     assert set(FEATURE_COLUMNS).issubset(featured.columns)
     assert np.isfinite(latest[FEATURE_COLUMNS].to_numpy()).all()
+    assert set(FEATURE_LABELS) == set(FEATURE_COLUMNS)
+
+
+def test_equal_weight_market_index_is_recent_and_rebased_to_100():
+    featured = add_technical_features(make_demo_ohlcv(periods=300))
+    index = equal_weight_market_index(featured, window=120)
+    assert len(index) == 120
+    assert np.isclose(index.iloc[0], 100.0)
+    assert np.isfinite(index.to_numpy()).all()
 
 
 def test_model_ranking_outputs_risk_levels():
