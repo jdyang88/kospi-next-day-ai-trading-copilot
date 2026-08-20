@@ -41,6 +41,11 @@ from src.ui.styles import APP_CSS
 
 
 MODEL_CACHE_SCHEMA = "v1.6.1"
+WATCHLIST_SESSION_SCHEMA = "2026-08-20-add-012450-316140"
+WATCHLIST_ADDITIONS = {
+    "012450": "한화에어로스페이스",
+    "316140": "우리금융지주",
+}
 
 
 st.set_page_config(
@@ -462,7 +467,7 @@ def settings_page(settings, data_label: str) -> None:
     c3.metric("주문 기능", "영구 비활성화")
     st.subheader("환경변수")
     st.code(
-        "APP_KEY=\nAPP_SECRET=\nACCOUNT_NO=\nACCOUNT_PRODUCT_CODE=01\nKIS_MODE=paper\nWATCHLIST=005930:삼성전자,000660:SK하이닉스,051910:LG화학,096770:SK이노베이션,005380:현대차,069500:KODEX 200,035420:NAVER,034730:SK,000720:현대건설,068270:셀트리온,006260:LS,207940:삼성바이오로직스",
+        "APP_KEY=\nAPP_SECRET=\nACCOUNT_NO=\nACCOUNT_PRODUCT_CODE=01\nKIS_MODE=paper\nWATCHLIST=005930:삼성전자,000660:SK하이닉스,051910:LG화학,096770:SK이노베이션,005380:현대차,069500:KODEX 200,035420:NAVER,034730:SK,000720:현대건설,068270:셀트리온,006260:LS,207940:삼성바이오로직스,012450:한화에어로스페이스,316140:우리금융지주",
         language="bash",
     )
     st.write(f"선택된 연결 모드: **{adapter.mode_label}**")
@@ -491,12 +496,20 @@ def settings_page(settings, data_label: str) -> None:
 def main() -> None:
     settings = load_settings()
     secret_watchlist, secret_watchlist_errors = parse_watchlist(settings.watchlist)
-    if "session_watchlist" not in st.session_state:
-        initial_watchlist = secret_watchlist or DEFAULT_WATCHLIST
+    if st.session_state.get("watchlist_session_schema") != WATCHLIST_SESSION_SCHEMA:
+        initial_watchlist = dict(
+            st.session_state.get("session_watchlist") or secret_watchlist or DEFAULT_WATCHLIST
+        )
+        # Preserve the user's existing list and migrate only the two additions
+        # requested for this release. After migration, the editor remains fully
+        # editable and the user may remove either symbol in the current session.
+        for ticker, name in WATCHLIST_ADDITIONS.items():
+            initial_watchlist.setdefault(ticker, name)
         st.session_state["session_watchlist"] = dict(initial_watchlist)
         st.session_state["watchlist_editor"] = "\n".join(
             f"{ticker}:{name}" for ticker, name in initial_watchlist.items()
         )
+        st.session_state["watchlist_session_schema"] = WATCHLIST_SESSION_SCHEMA
     with st.sidebar:
         st.markdown("### 메뉴")
         page = st.radio("페이지", ["오늘의 추천", "종목 스캐너", "백테스트", "매매일지", "설정"], label_visibility="collapsed")

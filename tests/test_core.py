@@ -187,7 +187,7 @@ def test_watchlists_are_validated_deduplicated_and_capped():
     assert truncated == 24
 
 
-def test_default_watchlist_is_the_requested_editable_twelve():
+def test_default_watchlist_is_the_requested_editable_fourteen():
     assert DEFAULT_WATCHLIST == {
         "005930": "삼성전자",
         "000660": "SK하이닉스",
@@ -201,6 +201,8 @@ def test_default_watchlist_is_the_requested_editable_twelve():
         "068270": "셀트리온",
         "006260": "LS",
         "207940": "삼성바이오로직스",
+        "012450": "한화에어로스페이스",
+        "316140": "우리금융지주",
     }
 
 
