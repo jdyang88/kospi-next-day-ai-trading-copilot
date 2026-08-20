@@ -28,10 +28,13 @@ MODEL_GATE_GUIDE = (
 def model_buy_gate(result: ModelResult) -> tuple[bool, str]:
     if result.auc < MIN_BUY_AUC:
         return False, f"검증 AUC {result.auc:.3f}로 기준 {MIN_BUY_AUC:.2f} 미만"
-    if result.accuracy < result.baseline_accuracy:
+    baseline_accuracy = getattr(result, "baseline_accuracy", None)
+    if baseline_accuracy is None:
+        return False, "이전 형식의 캐시 모델이므로 재학습 필요"
+    if result.accuracy < baseline_accuracy:
         return (
             False,
-            f"방향 정확도 {result.accuracy:.1%}가 단순 기준 {result.baseline_accuracy:.1%} 미만",
+            f"방향 정확도 {result.accuracy:.1%}가 단순 기준 {baseline_accuracy:.1%} 미만",
         )
     return True, "모델 검증 기준 통과"
 

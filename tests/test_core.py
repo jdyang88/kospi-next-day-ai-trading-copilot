@@ -94,6 +94,16 @@ def test_validated_model_can_emit_buy_recommendation():
     assert (ranked["decision"] == "매수 추천").any()
 
 
+def test_legacy_cached_model_fails_safely_without_new_metrics():
+    featured = add_technical_features(make_demo_ohlcv(periods=420))
+    result = train_direction_model(featured, validation_days=60)
+    result.auc = 0.60
+    del result.baseline_accuracy
+    ready, reason = model_buy_gate(result)
+    assert not ready
+    assert "재학습" in reason
+
+
 def test_confidence_guide_does_not_trigger_markdown_strikethrough():
     assert "~" not in CONFIDENCE_GUIDE
     assert all(label in CONFIDENCE_GUIDE for label in ["관찰", "보통", "높음", "매우 높음"])

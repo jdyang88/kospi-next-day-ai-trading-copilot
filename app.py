@@ -40,6 +40,9 @@ from src.ranking import (
 from src.ui.styles import APP_CSS
 
 
+MODEL_CACHE_SCHEMA = "v1.6.1"
+
+
 st.set_page_config(
     page_title="KOSPI Next-Day AI Trading Copilot",
     page_icon="📈",
@@ -102,7 +105,11 @@ def load_kis_snapshot(
 
 
 @st.cache_resource(show_spinner=False)
-def load_model(featured: pd.DataFrame):
+def load_model(featured: pd.DataFrame, cache_schema: str):
+    # cache_schema intentionally participates in Streamlit's cache key. Bump it
+    # whenever ModelResult fields change so a pre-deploy object cannot survive
+    # into code that expects the new schema.
+    del cache_schema
     return train_direction_model(featured)
 
 
@@ -282,8 +289,12 @@ def recommendations_page(featured: pd.DataFrame, model_result, data_label: str) 
             "AUC는 종목의 상대적 순위 구분 능력, 방향 정확도는 50% 기준의 정답 비율입니다. "
             f"현재 사용 모델은 {model_result.model_name}이며, 실행 환경에서 실제 학습에 사용된 알고리즘입니다."
         )
+        validation_size = getattr(model_result, "validation_size", None)
+        baseline_accuracy = getattr(model_result, "baseline_accuracy", None)
+        validation_size_label = f"{validation_size:,}건" if validation_size is not None else "재학습 필요"
+        baseline_label = pct(baseline_accuracy) if baseline_accuracy is not None else "재학습 필요"
         st.caption(
-            f"검증 표본 {model_result.validation_size:,}건 · 단순 기준 정확도 {pct(model_result.baseline_accuracy)} · "
+            f"검증 표본 {validation_size_label} · 단순 기준 정확도 {baseline_label} · "
             f"매수 판정: {'통과' if model_ready else '미통과'} ({gate_reason})"
         )
         st.caption(
@@ -568,7 +579,7 @@ def main() -> None:
             else:
                 st.info("위 버튼을 눌러야 KIS 시세가 추천에 반영됩니다.")
         st.markdown("---")
-        st.caption("v1.6.0 · 읽기 전용")
+        st.caption("v1.6.1 · 읽기 전용")
         st.markdown('<div class="mode-note">일봉 모델 + 장중 스냅샷<br>자동주문 영구 비활성화</div>', unsafe_allow_html=True)
 
     use_live = (
@@ -624,7 +635,7 @@ def main() -> None:
     if live_errors:
         render_kis_errors(live_errors, active_universe)
 
-    model_result = load_model(featured)
+    model_result = load_model(featured, MODEL_CACHE_SCHEMA)
 
     if page == "오늘의 추천":
         recommendations_page(featured, model_result, data_label)
