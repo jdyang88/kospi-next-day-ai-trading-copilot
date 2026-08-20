@@ -29,7 +29,14 @@ from src.features import (
 )
 from src.journal import append_trade, load_journal
 from src.model import train_direction_model
-from src.ranking import CONFIDENCE_GUIDE, rank_stocks
+from src.ranking import (
+    CONFIDENCE_GUIDE,
+    MODEL_GATE_GUIDE,
+    MIN_BUY_PROBABILITY,
+    MIN_CONFIRMATION_SIGNALS,
+    model_buy_gate,
+    rank_stocks,
+)
 from src.ui.styles import APP_CSS
 
 
@@ -154,15 +161,21 @@ def render_kis_errors(errors: dict[str, str], universe: dict[str, str]) -> None:
 
 
 def recommendation_row(rank: int, row: pd.Series, price_source: str) -> None:
+    decision_class = {
+        "매수 추천": "decision-buy",
+        "관찰": "decision-watch",
+        "매수 보류": "decision-hold",
+    }[row["decision"]]
     with st.container(border=True):
         cols = st.columns([2.0, 1.0, 1.05, 1.05, 1.05, 1.2, 3.0], vertical_alignment="center")
         with cols[0]:
             st.markdown(
-                f'<span class="rank">{rank}</span><span class="stock-name">{row["name"]}</span><span class="ticker">{row["ticker"]}</span>',
+                f'<span class="rank">{rank}</span><span class="stock-name">{row["name"]}</span><span class="ticker">{row["ticker"]}</span>'
+                f'<br><span class="decision {decision_class}">{row["decision"]}</span>',
                 unsafe_allow_html=True,
             )
         with cols[1]:
-            st.markdown(f'<span class="label">상승 확률</span><span class="prob">{pct(row["probability"], 0)}</span>', unsafe_allow_html=True)
+            st.markdown(f'<span class="label">상승 모델 점수</span><span class="prob">{pct(row["probability"], 0)}</span>', unsafe_allow_html=True)
             st.progress(float(row["probability"]))
         with cols[2]:
             st.markdown(
@@ -186,7 +199,7 @@ def recommendations_page(featured: pd.DataFrame, model_result, data_label: str) 
     title_col, action_col = st.columns([4.5, 1], vertical_alignment="center")
     with title_col:
         st.markdown(
-            f'<div class="section-head"><strong>오늘의 Top 5</strong><span>{data_label} 기준</span></div>',
+            f'<div class="section-head"><strong>오늘의 매수 판단</strong><span>{data_label} 기준 · 상위 5종목</span></div>',
             unsafe_allow_html=True,
         )
     with action_col:
@@ -194,20 +207,40 @@ def recommendations_page(featured: pd.DataFrame, model_result, data_label: str) 
             st.cache_resource.clear()
             st.rerun()
 
-    with st.expander("상승 확률은 어떻게 계산하나요?"):
+    ranked = rank_stocks(featured, model_result)
+    model_ready, gate_reason = model_buy_gate(model_result)
+    buys = ranked[ranked["decision"] == "매수 추천"]
+    if not buys.empty:
+        buy_names = ", ".join(buys["name"].tolist())
         st.markdown(
-            """
-- **예측 대상:** 오늘까지의 정보로 **다음 거래일 종가가 오늘 종가보다 높을 확률**을 추정합니다.
+            f'<div class="decision-summary"><strong>매수 추천: {buy_names}</strong>'
+            '<span>모델 검증과 종목별 신호 기준을 모두 통과했습니다. 실제 주문 전 현재가, 뉴스, 거래량과 손절 가능 여부를 다시 확인하세요.</span></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        summary_reason = gate_reason if not model_ready else "상위 종목이 개별 매수 기준을 충족하지 못했습니다."
+        st.markdown(
+            '<div class="decision-summary"><strong>오늘은 매수 추천 종목이 없습니다.</strong>'
+            f'<span>{summary_reason}. 추천을 억지로 만들지 않고 관찰 또는 매수 보류로 표시합니다.</span></div>',
+            unsafe_allow_html=True,
+        )
+
+    with st.expander("매수 추천은 어떻게 판정하나요?"):
+        st.markdown(
+            f"""
+- **모델 검증 기준:** {MODEL_GATE_GUIDE}를 모두 충족해야 합니다.
+- **종목별 기준:** 상승 모델 점수 **{MIN_BUY_PROBABILITY:.0%} 이상**, 긍정적 기술 신호 **{MIN_CONFIRMATION_SIGNALS}개 이상**이어야 합니다.
+- **최종 판정:** 모든 조건 통과 시 `매수 추천`, 모델은 통과했지만 종목 기준이 부족하면 `관찰`, 모델 검증이 부족하면 `매수 보류`입니다.
+- **예측 대상:** 오늘까지의 정보로 **다음 거래일 종가가 오늘 종가보다 높을 가능성**을 추정합니다.
 - **입력 정보:** 1·5·20일 수익률, 이동평균선과의 괴리, RSI, MACD, 볼린저밴드, ATR, 거래량 비율, 시장 대비 상대강도를 사용합니다.
 - **학습·검증:** 과거 데이터는 시간순으로 나누며, 최근 검증 구간을 학습에서 제외해 미래 정보를 미리 보는 오류를 방지합니다.
-- **표시 방법:** 모델의 상승 확률을 기준으로 종목을 정렬해 상위 5개를 보여줍니다.
-- **확률 단계:** 상승확률을 읽기 쉽게 4개 구간으로 나눈 보조 표시이며, 별도로 계산한 모델 신뢰성이나 수익 보장이 아닙니다.
+- **표시 방법:** 모델 점수와 상대강도·거래량을 함께 반영해 상위 5개를 보여줍니다.
+- **확률 단계:** 모델 점수를 읽기 쉽게 4개 구간으로 나눈 보조 표시이며, 최종 매수 판정이나 수익 보장이 아닙니다.
 
-상승 확률은 **예상 수익률이나 수익 보장 수치가 아닙니다.** 예를 들어 60%는 과거 패턴을 학습한 모델이 상승 쪽에 0.60의 확률을 부여했다는 뜻이며, 상승 폭의 크기는 나타내지 않습니다.
+모델 점수는 **실제로 상승할 확률이나 수익 보장 수치가 아닙니다.** 검증 기준을 통과하지 못한 날에는 점수가 높아도 `매수 추천`으로 표시하지 않습니다.
             """
         )
 
-    ranked = rank_stocks(featured, model_result)
     price_source = "KIS 시세" if data_label.startswith("KIS") else "합성 데모"
     for idx, row in ranked.iterrows():
         recommendation_row(idx + 1, row, price_source)
@@ -221,7 +254,7 @@ def recommendations_page(featured: pd.DataFrame, model_result, data_label: str) 
     left, right = st.columns([1.15, 1], gap="large")
     with left:
         st.subheader("모델 검증")
-        m1, m2, m3 = st.columns(3)
+        m1, m2, m3, m4 = st.columns(4)
         model_display_name = {
             "RandomForest (fallback)": "RF",
         }.get(model_result.model_name, model_result.model_name)
@@ -240,9 +273,18 @@ def recommendations_page(featured: pd.DataFrame, model_result, data_label: str) 
             model_display_name,
             help="LightGBM을 우선 사용하며, 설치되지 않은 경우 XGBoost, RandomForest 순으로 대체합니다.",
         )
+        m4.metric(
+            "매수 판정 모델",
+            "통과" if model_ready else "미통과",
+            help=f"{MODEL_GATE_GUIDE}. 현재 판정: {gate_reason}",
+        )
         st.caption(
             "AUC는 종목의 상대적 순위 구분 능력, 방향 정확도는 50% 기준의 정답 비율입니다. "
             f"현재 사용 모델은 {model_result.model_name}이며, 실행 환경에서 실제 학습에 사용된 알고리즘입니다."
+        )
+        st.caption(
+            f"검증 표본 {model_result.validation_size:,}건 · 단순 기준 정확도 {pct(model_result.baseline_accuracy)} · "
+            f"매수 판정: {'통과' if model_ready else '미통과'} ({gate_reason})"
         )
         st.caption(
             f"시간순 검증 · 학습 데이터 종료 {model_result.train_end:%Y-%m-%d} · "
@@ -526,7 +568,7 @@ def main() -> None:
             else:
                 st.info("위 버튼을 눌러야 KIS 시세가 추천에 반영됩니다.")
         st.markdown("---")
-        st.caption("v1.5.1 · 읽기 전용")
+        st.caption("v1.6.0 · 읽기 전용")
         st.markdown('<div class="mode-note">일봉 모델 + 장중 스냅샷<br>자동주문 영구 비활성화</div>', unsafe_allow_html=True)
 
     use_live = (

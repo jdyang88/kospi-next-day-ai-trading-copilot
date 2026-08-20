@@ -17,6 +17,8 @@ class ModelResult:
     model_name: str
     auc: float
     accuracy: float
+    baseline_accuracy: float
+    validation_size: int
     train_end: pd.Timestamp
     validation_start: pd.Timestamp
     feature_importance: pd.DataFrame
@@ -85,6 +87,8 @@ def train_direction_model(featured: pd.DataFrame, validation_days: int = 90) -> 
     prediction = (probability >= 0.5).astype(int)
     auc = float(roc_auc_score(valid["target"], probability)) if valid["target"].nunique() > 1 else 0.5
     accuracy = float(accuracy_score(valid["target"], prediction))
+    positive_rate = float(valid["target"].mean())
+    baseline_accuracy = max(positive_rate, 1.0 - positive_rate)
     importance = getattr(model, "feature_importances_", np.zeros(len(FEATURE_COLUMNS)))
     feature_importance = pd.DataFrame({"feature": FEATURE_COLUMNS, "importance": importance}).sort_values(
         "importance", ascending=False
@@ -94,6 +98,8 @@ def train_direction_model(featured: pd.DataFrame, validation_days: int = 90) -> 
         model_name=model_name,
         auc=auc,
         accuracy=accuracy,
+        baseline_accuracy=baseline_accuracy,
+        validation_size=len(valid),
         train_end=pd.Timestamp(train["date"].max()),
         validation_start=split_date,
         feature_importance=feature_importance,
@@ -102,4 +108,3 @@ def train_direction_model(featured: pd.DataFrame, validation_days: int = 90) -> 
 
 def predict_upside(model: ClassifierMixin, rows: pd.DataFrame) -> np.ndarray:
     return model.predict_proba(rows[FEATURE_COLUMNS])[:, 1]
-

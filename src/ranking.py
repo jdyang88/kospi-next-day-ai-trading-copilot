@@ -14,8 +14,29 @@ CONFIDENCE_GUIDE = (
     "3/4 높음(62% 초과, 70% 이하) → 4/4 매우 높음(70% 초과)"
 )
 
+# A stock is labelled "매수 추천" only when both the model and the individual
+# signal clear transparent minimum gates. These are product safety gates, not a
+# claim that the trade will be profitable.
+MIN_BUY_AUC = 0.55
+MIN_BUY_PROBABILITY = 0.62
+MIN_CONFIRMATION_SIGNALS = 2
+MODEL_GATE_GUIDE = (
+    f"검증 AUC {MIN_BUY_AUC:.2f} 이상 · 방향 정확도가 단순 기준 이상"
+)
 
-def _reason(row: pd.Series) -> str:
+
+def model_buy_gate(result: ModelResult) -> tuple[bool, str]:
+    if result.auc < MIN_BUY_AUC:
+        return False, f"검증 AUC {result.auc:.3f}로 기준 {MIN_BUY_AUC:.2f} 미만"
+    if result.accuracy < result.baseline_accuracy:
+        return (
+            False,
+            f"방향 정확도 {result.accuracy:.1%}가 단순 기준 {result.baseline_accuracy:.1%} 미만",
+        )
+    return True, "모델 검증 기준 통과"
+
+
+def _signals(row: pd.Series) -> list[str]:
     signals: list[str] = []
     if row["ma_20_gap"] > 0:
         signals.append("20일선 상회")
@@ -27,7 +48,11 @@ def _reason(row: pd.Series) -> str:
         signals.append("MACD 모멘텀 개선")
     if row["volume_ratio_20"] > 1.05:
         signals.append("거래량 증가")
-    return " · ".join(signals[:3]) or "복합 기술지표 점수 상위"
+    return signals
+
+
+def _reason(row: pd.Series) -> str:
+    return " · ".join(_signals(row)[:3]) or "복합 기술지표 점수 상위"
 
 
 def rank_stocks(featured: pd.DataFrame, result: ModelResult, top_n: int = 5) -> pd.DataFrame:
@@ -48,5 +73,31 @@ def rank_stocks(featured: pd.DataFrame, result: ModelResult, top_n: int = 5) -> 
         latest["probability"], bins=[-np.inf, 0.54, 0.62, 0.70, np.inf], labels=CONFIDENCE_LABELS
     ).astype(str)
     latest["confidence_level"] = latest["confidence"].map(CONFIDENCE_LEVELS).astype(int)
+    latest["confirmation_count"] = latest.apply(lambda row: len(_signals(row)), axis=1)
+    model_ready, gate_reason = model_buy_gate(result)
+    buy_mask = (
+        model_ready
+        & (latest["probability"] >= MIN_BUY_PROBABILITY)
+        & (latest["confirmation_count"] >= MIN_CONFIRMATION_SIGNALS)
+    )
+    observe_mask = (
+        model_ready
+        & ~buy_mask
+        & (latest["probability"] > 0.54)
+    )
+    latest["decision"] = np.select(
+        [buy_mask, observe_mask],
+        ["매수 추천", "관찰"],
+        default="매수 보류",
+    )
+    latest["decision_reason"] = np.where(
+        model_ready,
+        np.where(
+            buy_mask,
+            f"상승 점수 {MIN_BUY_PROBABILITY:.0%} 이상 · 기술 신호 {MIN_CONFIRMATION_SIGNALS}개 이상",
+            "종목별 매수 기준 미충족",
+        ),
+        gate_reason,
+    )
     latest["reason"] = latest.apply(_reason, axis=1)
     return latest.sort_values(["score", "probability"], ascending=False).head(top_n).reset_index(drop=True)

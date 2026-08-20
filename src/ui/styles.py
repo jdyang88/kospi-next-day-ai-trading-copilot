@@ -28,6 +28,13 @@ h3 { font-size:1.02rem !important; }
 .stop { color:var(--risk); }
 .reason { color:#475467; font-size:.77rem; line-height:1.55; }
 .confidence { color:var(--green); font-size:.72rem; font-weight:600; }
+.decision { display:inline-block; margin:.38rem 0 0 2.45rem; padding:.16rem .48rem; border-radius:999px; font-size:.68rem; font-weight:700; }
+.decision-buy { color:#05603a; background:#dff4e9; }
+.decision-watch { color:#8a5a00; background:#fff3d6; }
+.decision-hold { color:#7a3e3e; background:#fbe9e9; }
+.decision-summary { border:1px solid var(--line); border-radius:10px; padding:.85rem 1rem; margin:.75rem 0 1rem; background:white; }
+.decision-summary strong { display:block; font-size:1rem; margin-bottom:.2rem; }
+.decision-summary span { color:var(--muted); font-size:.78rem; line-height:1.5; }
 .metric-strip { background:white; border:1px solid var(--line); border-radius:11px; padding:.8rem .9rem; }
 [data-testid="stMetric"] { background:white; border:1px solid var(--line); border-radius:10px; padding:.75rem .85rem; }
 [data-testid="stMetricLabel"] { color:var(--muted); }

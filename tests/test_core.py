@@ -21,7 +21,7 @@ from src.features import (
     latest_feature_rows,
 )
 from src.model import train_direction_model
-from src.ranking import CONFIDENCE_GUIDE, rank_stocks
+from src.ranking import CONFIDENCE_GUIDE, model_buy_gate, rank_stocks
 
 
 def test_feature_pipeline_and_latest_rows():
@@ -51,12 +51,47 @@ def test_model_ranking_outputs_risk_levels():
     assert result.train_end < result.validation_start
     assert 0 <= result.auc <= 1
     assert 0 <= result.accuracy <= 1
+    assert 0.5 <= result.baseline_accuracy <= 1
+    assert result.validation_size > 0
     assert len(ranked) == 5
     assert ranked["probability"].between(0, 1).all()
     assert ranked["confidence"].isin(["관찰", "보통", "높음", "매우 높음"]).all()
     assert ranked["confidence_level"].between(1, 4).all()
+    assert ranked["decision"].isin(["매수 추천", "관찰", "매수 보류"]).all()
     assert (ranked["target_price"] > ranked["entry"]).all()
     assert (ranked["stop_price"] < ranked["entry"]).all()
+
+
+def test_failed_model_gate_never_emits_buy_recommendation():
+    featured = add_technical_features(make_demo_ohlcv(periods=420))
+    result = train_direction_model(featured, validation_days=60)
+    result.auc = 0.506
+    result.accuracy = 0.477
+    result.baseline_accuracy = 0.53
+    ready, reason = model_buy_gate(result)
+    ranked = rank_stocks(featured, result)
+    assert not ready
+    assert "AUC" in reason
+    assert (ranked["decision"] == "매수 보류").all()
+
+
+class _HighProbabilityModel:
+    def predict_proba(self, rows):
+        probability = np.full(len(rows), 0.80)
+        return np.column_stack([1.0 - probability, probability])
+
+
+def test_validated_model_can_emit_buy_recommendation():
+    featured = add_technical_features(make_demo_ohlcv(periods=420))
+    result = train_direction_model(featured, validation_days=60)
+    result.model = _HighProbabilityModel()
+    result.auc = 0.60
+    result.accuracy = 0.58
+    result.baseline_accuracy = 0.53
+    ready, _ = model_buy_gate(result)
+    ranked = rank_stocks(featured, result)
+    assert ready
+    assert (ranked["decision"] == "매수 추천").any()
 
 
 def test_confidence_guide_does_not_trigger_markdown_strikethrough():
